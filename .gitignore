@@ -1,0 +1,21 @@
+node_modules/
+*.log
+
+# Build output
+shim/build/
+shim/*.so
+targets/build/
+
+# Materialized crash images and captured traces. Large, regenerable, and
+# machine-specific. Test fixtures under core/tests/ are committed.
+artifacts/**/*.img
+artifacts/**/*.img.*
+artifacts/**/images/
+artifacts/**/traces/
+*.loop
+!core/tests/**/fixtures/**
+
+# plots/out/ is committed: figures are versioned alongside the scripts that
+# generate them.
+
+.DS_Store

@@ -1,0 +1,23 @@
+{
+  "name": "crashfuzz",
+  "module": "core/src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "cf": "bun run core/src/index.ts",
+    "test": "bun test",
+    "test:controls": "bun test core/tests/controls",
+    "typecheck": "bunx tsc --noEmit",
+    "shim": "make -C shim",
+    "vm:up": "limactl start --name=crashfuzz vm/lima.yaml",
+    "vm:sh": "limactl shell crashfuzz",
+    "vm:down": "limactl stop crashfuzz",
+    "plots": "python3 plots/scripts/render_all.py"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

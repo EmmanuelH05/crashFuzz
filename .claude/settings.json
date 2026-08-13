@@ -1,0 +1,16 @@
+{
+  "enabledPlugins": {
+    "javascript-typescript@claude-code-workflows": true,
+    "python-development@claude-code-workflows": true,
+    "tdd-guard@tdd-guard": true,
+    "pr-review-toolkit@claude-plugins-official": true,
+    "ecc@ecc": false,
+    "claude-mem@thedotmack": false,
+    "frontend-mobile-development@claude-code-workflows": false,
+    "storybook@storybook": false,
+    "vercel@claude-plugins-official": false,
+    "swift-lsp@claude-plugins-official": false,
+    "data-engineering@claude-code-workflows": false
+  },
+  "_docs": "Repo profile: C shim, TypeScript/Bun orchestrator, matplotlib for figures. python-development is enabled for plots/ only."
+}

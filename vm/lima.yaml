@@ -1,0 +1,77 @@
+# Ubuntu VM used as the execution host for crashfuzz.
+#
+# crashfuzz requires LD_PRELOAD, ext4/xfs/btrfs, and loopback block devices.
+# None are available on macOS, so all runtime components execute here.
+#
+#   limactl start --name=crashfuzz vm/lima.yaml
+#   limactl shell crashfuzz
+
+vmType: "vz"
+rosetta:
+  enabled: false
+
+images:
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+  - location: "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+
+cpus: 6
+memory: "12GiB"
+# Sized for the Phase 4 campaign, which materializes and discards ~10k sparse images.
+disk: "80GiB"
+
+mountType: "virtiofs"
+# Source is mounted from the host so editing and git stay on macOS.
+# Crash images are written to /var/lib/crashfuzz on the guest disk instead,
+# since virtiofs does not provide the filesystem semantics under test.
+mounts:
+  - location: "~/crashFuzz"
+    writable: true
+
+containerd:
+  system: false
+  user: false
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y --no-install-recommends \
+        build-essential clang lld pkg-config \
+        e2fsprogs xfsprogs btrfs-progs util-linux \
+        strace ltrace gdb \
+        python3 python3-pip python3-matplotlib python3-numpy \
+        git curl ca-certificates unzip \
+        sqlite3 libsqlite3-dev \
+        cmake ninja-build
+
+      mkdir -p /var/lib/crashfuzz/{images,mnt,traces}
+      chmod 0777 /var/lib/crashfuzz
+
+      # Phase 4 sweeps all three filesystems. Fail provisioning if any is
+      # unavailable rather than skipping it at campaign time.
+      for fs in ext4 xfs btrfs; do
+        modprobe "$fs" || true
+        grep -qw "$fs" /proc/filesystems || {
+          echo "error: $fs not available on this kernel" >&2
+          exit 1
+        }
+      done
+
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      command -v bun >/dev/null || curl -fsSL https://bun.sh/install | bash
+
+probes:
+  - description: "bun installed"
+    script: |
+      #!/bin/bash
+      set -eu -o pipefail
+      timeout 60s bash -c "until [ -x \"$HOME/.bun/bin/bun\" ]; do sleep 3; done"
+    hint: "Check: limactl shell crashfuzz -- cat /var/log/cloud-init-output.log"

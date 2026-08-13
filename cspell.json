@@ -1,0 +1,16 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "ALICE", "bbolt", "blake", "btrfs", "bunx", "Bornholt", "BadgerDB",
+    "crashfuzz", "crashmonkey", "cloudimg", "dlsym", "dirfd", "dsync",
+    "e2fsprogs", "errno", "fallocate", "fdatasync", "Ferrite", "fjall", "fsync",
+    "iovec", "limactl", "linkat", "losetup", "ltrace", "LMDB",
+    "matplotlib", "mkfs", "Mohan", "msync", "musl", "nerdctl", "noninteractive",
+    "openat", "Pathfinder", "Pebble", "Pillai", "pread", "pwrite", "pwritev",
+    "Rebello", "redb", "renameat", "RocksDB", "ringbuf", "RTLD",
+    "sqlite", "strace", "syscall", "syscalls", "TMPFILE", "unlinkat",
+    "utsaslab", "virtiofs", "writeback", "writev", "xfsprogs", "xfs", "xxh"
+  ],
+  "ignorePaths": ["node_modules/**", "artifacts/**", "bun.lock"]
+}
