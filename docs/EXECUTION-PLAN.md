@@ -249,15 +249,17 @@ Implementation concerns:
    until `msync`. Targets that write through mmap have an unobservable window. This is
    recorded in `docs/coverage.md` when encountered.
 
-Exit criteria (from `CLAUDE.md`):
+Exit criteria (from `CLAUDE.md`; all met 2026-08-15, evidence in `docs/journal.md`):
 
-- [ ] A hand-written workload's trace matches a manually derived expected sequence exactly
-- [ ] The target's own test suite passes under interception
-- [ ] Multithreaded capture preserves a total order without deadlocking
-- [ ] A 10,000-operation workload is traced in under 60 s, with size reported
-- [ ] Payload storage is content-addressed
+- [x] A hand-written workload's trace matches a manually derived expected sequence exactly
+- [x] The target's own test suite passes under interception
+- [x] Multithreaded capture preserves a total order without deadlocking
+- [x] A 10,000-operation workload is traced in under 60 s, with size reported
+- [x] Payload storage is content-addressed
 
-Commit: `phase1: trace capture, <N> syscalls intercepted, 10k ops in <T>s / <S>MB`
+Format specification: `docs/trace-format.md`.
+
+Commit: `phase1: trace capture, 14 call names intercepted, 10k ops in 0.4s / 2.5MB`
 
 ---
 

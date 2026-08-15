@@ -24,6 +24,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
+#include <time.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -254,6 +255,18 @@ static int thread_id(void)
  * returned. emit_event is called after the underlying call, so it takes the
  * completion stamp itself.
  */
+/* CLOCK_REALTIME nanoseconds, so records can be lined up with external logs. */
+static unsigned long long wall_time_ns(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0)
+        return 0;
+    return (unsigned long long)ts.tv_sec * 1000000000ULL + (unsigned long long)ts.tv_nsec;
+}
+
+/* Open flags, carried on open records and zero elsewhere. */
+static __thread int pending_flags;
+
 static void emit_event(unsigned long long index, const char *call, int fd,
                        const char *path, const char *path2, long long offset,
                        size_t length, long long ret, int err, const char *digest)
@@ -264,10 +277,13 @@ static void emit_event(unsigned long long index, const char *call, int fd,
     int len = snprintf(record, sizeof record,
                        "{\"rec\":\"event\",\"i\":%llu,\"j\":%llu,\"call\":\"%s\","
                        "\"fd\":%d,\"tid\":%d,\"path\":\"%s\",\"path2\":\"%s\","
-                       "\"off\":%lld,\"len\":%zu,\"ret\":%lld,\"err\":%d,\"dig\":\"%s\"}\n",
+                       "\"off\":%lld,\"len\":%zu,\"ret\":%lld,\"err\":%d,\"flags\":%d,"
+                       "\"t\":%llu,\"dig\":\"%s\"}\n",
                        index, completion, call, fd, thread_id(),
                        path == NULL ? "" : path, path2 == NULL ? "" : path2,
-                       offset, length, ret, err, digest == NULL ? "" : digest);
+                       offset, length, ret, err, pending_flags, wall_time_ns(),
+                       digest == NULL ? "" : digest);
+    pending_flags = 0;
     emit(record, (size_t)len);
 }
 
@@ -354,7 +370,9 @@ EXPORT int open(const char *path, int flags, ...)
     int err = fd < 0 ? errno : 0;
 
     remember_path(fd, path);
-    emit_event(index, "open", fd, path_for(fd), NULL, 0, 0, fd, err, NULL);
+    pending_flags = flags;
+    if (!is_marker_fd(fd))
+        emit_event(index, "open", fd, path_for(fd), NULL, 0, 0, fd, err, NULL);
     return fd;
 }
 
@@ -549,7 +567,9 @@ EXPORT int open64(const char *path, int flags, ...)
     int err = fd < 0 ? errno : 0;
 
     remember_path(fd, path);
-    emit_event(index, "open", fd, path_for(fd), NULL, 0, 0, fd, err, NULL);
+    pending_flags = flags;
+    if (!is_marker_fd(fd))
+        emit_event(index, "open", fd, path_for(fd), NULL, 0, 0, fd, err, NULL);
     return fd;
 }
 
@@ -610,6 +630,7 @@ EXPORT int openat(int dirfd, const char *path, int flags, ...)
 
     char resolved[PATH_MAX];
     remember_path(fd, resolve_at(dirfd, path, resolved));
+    pending_flags = flags;
     if (!is_marker_fd(fd))
         emit_event(index, "open", fd, path_for(fd), NULL, 0, 0, fd, err, NULL);
     return fd;

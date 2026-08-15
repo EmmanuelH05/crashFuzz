@@ -24,6 +24,11 @@
   BadgerDB were rejected on this basis (`docs/target-selection.md`). No `ptrace` ingestion
   path is implemented, so this class of target is untested.
 
+- **Descriptors at or above 1024, and vectored writes over 64 KiB.** The shim caps its
+  descriptor table at 1024 entries, so a call on a higher descriptor is traced without a
+  path, and a `writev` whose buffers exceed 64 KiB is recorded without a digest rather than
+  with a partial one. Neither limit was reached by redb or SQLite in any run so far.
+
 - **Traces containing a failed persistence call.** The persistence model assumes every
   intercepted call returned success. `fsync` error handling is a separate bug class
   (Rebello et al., ATC '20) and an explicit non-goal, so a trace with a non-zero `errno` on

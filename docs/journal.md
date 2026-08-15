@@ -166,6 +166,105 @@ and the probe is not used after Phase 0.
 
 ---
 
+## 2026-08-15 — Phase 1: Trace capture
+
+### Interception mechanism
+
+`LD_PRELOAD` is the implemented mechanism. `strace` ingestion is not built.
+
+| | `LD_PRELOAD` | `ptrace` / `strace` |
+|---|---|---|
+| Per-call cost measured here | ~40 µs including payload digest and store | 10–100 µs per call, before payload retrieval |
+| Payload capture | buffer is in scope, digested directly | needs `process_vm_readv` per call |
+| Observes raw `syscall()` | no | yes |
+| Observes Go runtime I/O | no | yes |
+| Target build changes | none | none |
+
+The decision rests on the target rather than on the mechanism's merits: redb is
+Rust, so it calls libc and is fully observable. The measured 10,000-operation
+run took 0.4 s wall clock with tracing on, which leaves the Phase 4 campaign
+compute budget to the crash-state work rather than to capture.
+
+`ptrace` remains the fallback if a later target does not route through libc, and
+that is the only reason a second mechanism would be built. eBPF was evaluated and
+rejected against the userspace-only boundary in `CLAUDE.md`.
+
+### Tried
+
+Built the shim, trace format v1, the payload store, the reader and the replayer.
+Ran redb's own test suite under interception.
+
+### Failed
+
+**1. The digest and the store both needed a design decision the plan had already
+made differently.** `docs/EXECUTION-PLAN.md` §5 specifies blake3. The shim uses
+SHA-256 instead: it is one self-contained file with no SIMD build configuration,
+and at 10,000 operations the digest is not the bottleneck (0.4 s total for the
+run, dominated by the payload writes). The property the store needs is collision
+resistance, which both provide. The implementation is checked against reference
+digests on both padding paths, since a hand-written hash that is subtly wrong
+would silently merge distinct payloads into one object.
+
+**2. `realpath` into a 512-byte buffer aborted the target.** glibc's `realpath`
+writes up to `PATH_MAX` regardless of the destination size, so a short buffer is
+a buffer overflow, and `_FORTIFY_SOURCE` terminated the workload. Path storage is
+now `PATH_MAX` per descriptor with the descriptor table capped at 1024 entries.
+
+**3. Replay wrote the right bytes to the wrong offsets.** The replayer opened
+files with `a+`. On Linux `O_APPEND` ignores the position argument of a
+positional write, so every write landed at the end of the file and a trace that
+overwrote a header produced a file with the header appended instead. Opening
+`r+`, falling back to `w+` for a file that does not exist yet, fixed it. The test
+that caught it compares the replayed bytes against the bytes the traced workload
+actually left on disk, which is the only comparison that would have caught it.
+
+**4. `tdd-report` reported a previous run's results as the current ones.** bun
+writes no JUnit file when a test module fails to load, and the bridge read the
+stale file left from the run before. It now removes the file first and treats a
+missing file as a failed run.
+
+### Learned
+
+**The marker channel needs to be excluded at open, not only at write.** The first
+implementation filtered writes to the marker descriptor but still emitted an open
+event for the marker file. The marker test passed anyway because it only counted
+writes. A trace that contains an open for a file the target never opened is wrong
+in exactly the way that is hard to notice later, when a persistence graph is
+built from it.
+
+**Interposing a call is not the same as interposing an operation.** `rename`,
+`renameat` and `renameat2` are three symbols for one operation, and a target that
+uses the third is invisible to a shim that hooks the first. The trace records
+normalized call names for this reason, with the mapping written down in
+`docs/trace-format.md` so the graph in Phase 2 does not have to rediscover it.
+
+### Model decision
+
+None. The six questions in `docs/EXECUTION-PLAN.md` §6 are still open and are
+argued before Phase 2 implementation begins, per `CLAUDE.md`.
+
+### Gate status
+
+Phase 1 exit criteria:
+
+- [x] A hand-written workload's trace matches a manually derived expected
+      sequence exactly. `core/tests/integration/trace.test.ts` derives the
+      sequence for the rename-based update protocol in a comment and compares
+      the trace against it field by field.
+- [x] The target's own test suite passes under interception. redb at commit
+      `cff6e50`: 371 tests passed, 0 failed, both with and without
+      `LD_PRELOAD`. The traced run produced 270 MB of trace and payloads.
+- [x] Multithreaded capture preserves a total order without deadlocking. Four
+      threads, 20 write-and-fsync pairs each; the submission and completion
+      stamps together cover their range exactly once.
+- [x] A 10,000-operation workload is traced in under 60 s, with size reported.
+      0.4 s, 10,102 events, 2.5 MB of trace, 41 MB of payloads. The payload
+      volume is that high because every 4 KiB page written in that workload is
+      distinct, which is the case content addressing cannot compress.
+- [x] Payload storage is content-addressed.
+
+---
+
 <!--
 Entry template:
 

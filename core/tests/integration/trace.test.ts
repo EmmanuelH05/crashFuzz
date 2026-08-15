@@ -620,4 +620,42 @@ describe('shim.so', () => {
     })
     expect(events.find((r) => r.call === 'unlink')!.path).toBe(join(dir, 'b'))
   })
+
+  test('records open flags and a wall clock time for every event', async () => {
+    const bin = buildWorkload(
+      'open_flags',
+      `
+      #include <fcntl.h>
+      #include <stdio.h>
+      #include <unistd.h>
+      int main(int argc, char **argv) {
+        char path[512];
+        snprintf(path, sizeof path, "%s/f", argv[1]);
+
+        int a = open(path, O_CREAT | O_WRONLY | O_APPEND, 0644);
+        if (a < 0) return 1;
+        if (write(a, "abcd", 4) != 4) return 2;
+        if (close(a) != 0) return 3;
+
+        int b = open(path, O_WRONLY | O_TRUNC);
+        if (b < 0) return 4;
+        return close(b);
+      }
+      `,
+    )
+    const dir = mkdtempSync(join(workdir, 'flags-'))
+
+    const records = await readTrace(trace(bin, [dir]))
+    const events = records.filter((r) => r.rec === 'event')
+    const opens = events.filter((r) => r.call === 'open')
+
+    const O_APPEND = 0o2000
+    const O_TRUNC = 0o1000
+    expect((opens[0]!.flags as number) & O_APPEND).toBe(O_APPEND)
+    expect((opens[1]!.flags as number) & O_TRUNC).toBe(O_TRUNC)
+
+    const times = events.map((r) => r.t as number)
+    expect(times.every((t) => t > 0)).toBe(true)
+    expect([...times].sort((a, b) => a - b)).toEqual(times)
+  })
 })
