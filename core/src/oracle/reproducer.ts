@@ -33,6 +33,13 @@ export type ReproducerOptions = {
   /** Database file name inside the image. */
   dbName: string
   filesystem: Filesystem
+  /**
+   * The query tool for the target this finding came from, as a shell command
+   * taking the database path. An artifact that asks a different target reports
+   * a confident and false observation rather than failing visibly, so this is
+   * required rather than defaulted.
+   */
+  queryCommand: string
 }
 
 /**
@@ -71,9 +78,11 @@ set -euo pipefail
 
 here="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 repo="\${CRASHFUZZ_REPO:-$here/../../..}"
-query="$repo/targets/sqlite-workload/build/sqlite-query"
 
-[ -x "$query" ] || make -C "$repo/targets/sqlite-workload" >/dev/null
+# The query tool for the target this finding came from. Substituted when the
+# artifact was written, because asking a different target reports a confident
+# and false observation rather than failing visibly.
+query=(__QUERY_COMMAND__)
 
 mnt="$(mktemp -d)"
 loop="$(sudo losetup --find --show "$here/state.img")"
@@ -90,7 +99,7 @@ sudo chmod 0777 "$mnt"
 echo "--- expected ---"
 sed -n 's/^  //p' "$here/finding.json" | grep -E '"(key|expected|actual|violationClass)"'
 echo "--- observed now ---"
-"$query" "$mnt/__DB_NAME__"
+"\${query[@]}" "$mnt/__DB_NAME__"
 `
 
 const README = `# Crash-consistency finding
@@ -154,7 +163,13 @@ export function writeReproducer(finding: PackagedFinding, options: ReproducerOpt
     )}\n`,
   )
 
-  writeFileSync(join(options.outDir, 'run.sh'), RUN_SCRIPT.replace('__DB_NAME__', options.dbName))
+  writeFileSync(
+    join(options.outDir, 'run.sh'),
+    RUN_SCRIPT.replace('__QUERY_COMMAND__', options.queryCommand).replace(
+      '__DB_NAME__',
+      options.dbName,
+    ),
+  )
 
   const claim =
     finding.violation.violationClass === 'LOST_ACKED'

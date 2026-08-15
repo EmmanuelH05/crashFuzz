@@ -13,7 +13,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createImage, withMount } from '../../src/image/image'
 import { writeReproducer } from '../../src/oracle/reproducer'
@@ -83,7 +83,13 @@ describe('writeReproducer', () => {
           actual: '<absent>',
         },
       },
-      { outDir, tracePath, dbName: 'main.db', filesystem: 'ext4' },
+      {
+        outDir,
+        tracePath,
+        dbName: 'main.db',
+        filesystem: 'ext4',
+        queryCommand: join(REPO_ROOT, 'targets', 'sqlite-workload', 'build', 'sqlite-query'),
+      },
     )
 
     expect(existsSync(join(outDir, 'state.img'))).toBe(true)
@@ -104,5 +110,46 @@ describe('writeReproducer', () => {
     expect(script.exitCode).toBe(0)
     expect(output).toContain('integrity=ok')
     expect(output).toContain('k1')
+  }, 300_000)
+
+  test('asks the target the finding came from, not whichever target is hardcoded', () => {
+    // Found by running a redb artifact: the script asked SQLite's query tool
+    // about a redb database and reported "file is not a database". An artifact
+    // that queries the wrong target does not merely fail to reproduce, it
+    // reports a confident and completely false observation, which is the worst
+    // thing this project can hand a maintainer.
+    const outDir = join(workdir, 'artifact-target')
+    const tracePath = join(workdir, 'trace-for-target.jsonl')
+    writeFileSync(tracePath, `${JSON.stringify({ rec: 'header', v: 1, pid: 1 })}\n`)
+
+    writeReproducer(
+      {
+        signature: 'RECOVERY_FAILED|missing:ftruncate@main.redb',
+        occurrences: 11,
+        state: { crashPoint: 0, persisted: [], partial: [] },
+        imagePath: join(workdir, 'finding.img'),
+        violation: {
+          violationClass: 'RECOVERY_FAILED',
+          crashStamp: 1,
+          op: null,
+          key: '',
+          expected: '<opens and recovers>',
+          actual: 'assertion failed',
+        },
+      },
+      {
+        outDir,
+        tracePath,
+        dbName: 'main.redb',
+        filesystem: 'ext4',
+        queryCommand: '/bin/echo queried-by-the-right-target',
+      },
+    )
+
+    const script = Bun.spawnSync(['bash', join(outDir, 'run.sh')], {
+      env: { ...process.env, CRASHFUZZ_REPO: REPO_ROOT },
+    })
+
+    expect(script.stdout.toString()).toContain('queried-by-the-right-target')
   }, 300_000)
 })

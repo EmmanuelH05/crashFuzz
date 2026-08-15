@@ -78,7 +78,15 @@ describe('unsafe rename protocol', () => {
 
     // The finding has to survive packaging, or it cannot be reported to anyone.
     const outDir = join(workdir, 'artifact')
-    writeReproducer(lost[0]!, { outDir, tracePath, dbName: 'k1', filesystem: 'xfs' })
+    writeReproducer(lost[0]!, {
+      outDir,
+      tracePath,
+      dbName: 'k1',
+      filesystem: 'xfs',
+      // The unsafe store has no query tool: a value is whatever file bears its
+      // name, so reading the file is the whole of its recovery.
+      queryCommand: '/usr/bin/sha256sum',
+    })
 
     expect(existsSync(join(outDir, 'state.img'))).toBe(true)
     expect(existsSync(join(outDir, 'finding.json'))).toBe(true)

@@ -104,6 +104,7 @@ function main(argv: string[]): number {
         tracePath: capture.tracePath,
         dbName: DB_NAME,
         filesystem: run.config.filesystem,
+        queryCommand: redbBinary('redb-query'),
       })
     }
 
