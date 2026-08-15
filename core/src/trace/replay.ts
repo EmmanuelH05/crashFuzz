@@ -114,11 +114,13 @@ function applySelected(event: TraceEvent, options: ReplayOptions, bytes?: number
     case 'mkdir':
       mkdirSync(rebase(event.path, options), { recursive: true })
       break
+    // The source may have no data in this state and still exist: that is the
+    // rename-without-data shape, the whole reason this tool exists.
     case 'rename':
-      renameSync(rebase(event.path, options), rebase(event.path2, options))
+      renameSync(ensureFile(rebase(event.path, options)), rebase(event.path2, options))
       break
     case 'link':
-      linkSync(rebase(event.path, options), rebase(event.path2, options))
+      linkSync(ensureFile(rebase(event.path, options)), rebase(event.path2, options))
       break
     case 'unlink':
       rmSync(rebase(event.path, options), { force: true })

@@ -7,7 +7,8 @@
  * judgements belong to the target, not to this project.
  */
 
-import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RecoveryResult } from './oracle'
 
@@ -21,6 +22,31 @@ const QUERY_TOOL = join(
   'build',
   'sqlite-query',
 )
+
+/**
+ * Recovery for the unsafe key-value store, the positive control.
+ *
+ * That application has no recovery path and no integrity check: a value is
+ * whatever file bears its name. Reading the directory is therefore the whole of
+ * its recovery, and `integrityOk` is true because it has no invariant of its
+ * own to fail. Every violation it produces is a LOST_ACKED, which is the point.
+ */
+export function recoverFileKv(mountDir: string): RecoveryResult {
+  const values = new Map<string, string>()
+
+  for (const entry of readdirSync(mountDir, { withFileTypes: true })) {
+    // Temporary files are the protocol's scratch space, not values, and the
+    // marker file is the harness's own channel.
+    if (!entry.isFile()) continue
+    if (entry.name.endsWith('.tmp') || entry.name === 'crashfuzz.marker') continue
+
+    const hash = createHash('sha256')
+    hash.update(readFileSync(join(mountDir, entry.name)))
+    values.set(entry.name, hash.digest('hex'))
+  }
+
+  return { status: 'opened', integrityOk: true, values }
+}
 
 /**
  * Opens a database and reads back what survived. A database that will not open

@@ -20,8 +20,7 @@ import { materializeState, withMount } from '../image/image'
 import { parseAckLog } from '../oracle/acklog'
 import { signatureOf } from '../oracle/dedup'
 import { checkOracle } from '../oracle/oracle'
-import type { Violation } from '../oracle/oracle'
-import { recoverSqlite } from '../oracle/recover'
+import type { RecoveryResult, Violation } from '../oracle/oracle'
 import { parseTrace } from '../trace/reader'
 
 /** 512 MiB: above the 300 MiB xfsprogs minimum, sparse so it costs nothing unused. */
@@ -39,6 +38,12 @@ export type CampaignOptions = {
   model: FilesystemModel
   filesystem: Filesystem
   seed: number
+  /**
+   * Runs the target's own recovery against a mounted crash image. Supplied by
+   * the caller so the pipeline is not tied to one target: the control and the
+   * positive control differ only in this function.
+   */
+  recover: (mountDir: string) => RecoveryResult
 }
 
 export type Finding = {
@@ -105,9 +110,7 @@ export function runCampaign(options: CampaignOptions): CampaignResult {
     // Recovery runs inside the mount, against the filesystem the state was
     // enumerated for. Running it against a copy would test a filesystem the
     // model says nothing about.
-    const recovery = withMount(imagePath, (mountDir) =>
-      recoverSqlite(join(mountDir, options.dbName)),
-    )
+    const recovery = withMount(imagePath, (mountDir) => options.recover(mountDir))
 
     statesTested++
 

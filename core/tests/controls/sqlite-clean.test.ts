@@ -20,6 +20,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { runCampaign } from '../../src/campaign/campaign'
 import { ext4Ordered } from '../../src/graph/models'
+import { recoverSqlite } from '../../src/oracle/recover'
 
 const REPO_ROOT = join(import.meta.dir, '..', '..', '..')
 const SHIM_SO = join(REPO_ROOT, 'shim', 'build', 'shim.so')
@@ -72,6 +73,7 @@ describe('SQLite control', () => {
       model: ext4Ordered,
       filesystem: 'ext4',
       seed: 1,
+      recover: (mountDir) => recoverSqlite(join(mountDir, 'main.db')),
     })
 
     // A run that tested nothing is not a clean run.

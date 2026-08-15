@@ -39,6 +39,16 @@ export function selectCrashPoints(trace: Trace, options: SelectionOptions): numb
     return trace.events.map((_, index) => index)
   }
 
+  // The bound concentrates on crash points next to a persistence call because
+  // that is where Mohan et al. found every bug. A trace with no persistence call
+  // has none, so that argument says nothing about where to look and the sample
+  // would skip almost the whole trace. An application that promises durability
+  // without ever calling fsync is exactly the bug class this project hunts, so
+  // it is the last thing that should be dropped.
+  if (!trace.events.some((event) => PERSISTENCE.has(event.call))) {
+    return trace.events.map((_, index) => index)
+  }
+
   for (let index = 0; index < trace.events.length; index++) {
     const isPersistence = PERSISTENCE.has(trace.events[index]!.call)
     const followsPersistence = index > 0 && PERSISTENCE.has(trace.events[index - 1]!.call)

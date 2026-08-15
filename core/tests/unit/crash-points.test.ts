@@ -74,4 +74,21 @@ describe('selectCrashPoints', () => {
 
     expect(selected).toEqual([0, 1, 2])
   })
+
+  test('enumerates every crash point when the trace has no persistence call', () => {
+    // The bound concentrates on crash points next to a persistence call because
+    // Mohan et al. found every bug there. A workload that never calls fsync has
+    // none, so that argument says nothing about where to look and the sample
+    // would skip the trace almost entirely. An application that promises
+    // durability without ever calling fsync is precisely the bug class this
+    // project hunts, so it must not be the one that gets dropped.
+    const noFsync: Trace = {
+      ...TRACE,
+      events: TRACE.events.map((e) => ({ ...e, call: 'write' as const })),
+    }
+
+    const selected = selectCrashPoints(noFsync, { nonFsyncSampleRate: 0, seed: 1 })
+
+    expect(selected).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+  })
 })
