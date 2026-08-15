@@ -260,12 +260,12 @@ Execution plan: `docs/EXECUTION-PLAN.md`. Decision rationale: `docs/journal.md`.
 
 ---
 
-# Current state
+## Current state
 
 Last updated 2026-08-15 at commit `294c936`. Phases 0 and 1 are complete; Phase 2 is partly
 done. Anything below marked "not done" is the next work.
 
-## Where things stand
+### Where things stand
 
 | Phase | Status |
 |---|---|
@@ -280,7 +280,7 @@ Target: **redb** (Rust, Apache-2.0, `github.com/cberner/redb`). Control: **SQLit
 
 Commits, newest first:
 
-```
+```text
 294c936 phase2: filesystem models, crash state enumeration, controls
 1571c38 docs: persistence model decisions argued and transcribed
 13e4624 phase1: open flags, wall time, replay, format spec; all exit criteria met
@@ -290,7 +290,7 @@ Commits, newest first:
 389ca2b chore: scaffold repo, execution environment, and phase plan
 ```
 
-## What exists
+### What exists
 
 | Path | Contents |
 |---|---|
@@ -311,7 +311,7 @@ nothing has been found.
 
 28 tests across 6 files, all passing.
 
-## Trace format v1, in one paragraph
+### Trace format v1, in one paragraph
 
 Newline-delimited JSON in `<trace-dir>/trace-<pid>.jsonl`, payloads content-addressed in
 `<trace-dir>/cas/<sha256-hex>`. Each event carries submission stamp `i`, completion stamp
@@ -321,7 +321,7 @@ from one counter in a `MAP_SHARED` page, so forked children continue the same se
 Writes to a file named `crashfuzz.marker` become `marker` records and are excluded from the
 target's data path. Full spec: `docs/trace-format.md`.
 
-## Phase 2: what is left
+### Phase 2: what is left
 
 - [ ] Enumeration is deterministic and seed-reproducible. The enumerator is deterministic by
       construction (fixed iteration order, no randomness) but no test asserts it, and
@@ -341,7 +341,7 @@ The two Phase 2 controls that pass are unit-level: they check that the enumerato
 or does not produce, the rename-without-data state. They do not yet run against a real
 filesystem image.
 
-## Environment
+### Environment
 
 Lima VM named `crashfuzz`, Ubuntu 24.04 aarch64, kernel 6.8.0. `bun run vm:up` creates it,
 `bun run vm:sh` opens a shell. The repo is mounted at the same path inside the VM
@@ -353,13 +353,13 @@ puts `~/.bun/bin` and `~/.cargo/bin` on PATH.
 
 Scratch state on the guest disk, not in the repo:
 
-```
+```text
 /var/lib/crashfuzz/images        crash images (Phase 2, not yet used)
 /var/lib/crashfuzz/cargo-target  CARGO_TARGET_DIR for redb builds
 /var/lib/crashfuzz/suite/redb    redb clone used for the interception gate
 ```
 
-## Things that will bite
+### Things that will bite
 
 1. **glibc exposes 64-bit variants as separate symbols:** `pwrite64`, `ftruncate64`,
    `truncate64`, `open64`, `mmap64`. Rust's `std::fs` and anything built with
@@ -385,7 +385,7 @@ Scratch state on the guest disk, not in the repo:
 6. **The shim's marker handling applies at open as well as write.** A marker file traced as
    target I/O puts an operation in the graph that the target never performed.
 
-## Decisions a new session should not relitigate
+### Decisions a new session should not relitigate
 
 - The false-positive asymmetry decided the persistence model twice: properties differ per
   filesystem rather than being flattened into one conservative model, and any property no
