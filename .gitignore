@@ -19,3 +19,10 @@ artifacts/**/traces/
 # generate them.
 
 .DS_Store
+
+# tdd-guard test result bridge output (regenerated each run)
+.claude/tdd-guard/
+
+# Cargo build output for Phase 0 target workloads
+targets/**/target/
+Cargo.lock

@@ -42,9 +42,9 @@ produce violations that are correct behavior.
 
 | Target | Setting | Value | Rationale |
 |---|---|---|---|
-| SQLite (control) | `journal_mode` | TBD | |
+| SQLite (control) | `journal_mode` | `WAL` | The mode most deployments use, and the one whose durability depends on `synchronous`. Pinned so the control's expected behavior is a single known contract rather than a default that may vary by build. |
 | SQLite (control) | `synchronous` | `FULL` | At `NORMAL` in WAL mode, SQLite documents that recently committed transactions may be lost after a power failure. |
-| _(primary)_ | | | |
+| redb (primary) | `Durability` | `Immediate` for operations the oracle expects to survive; `None` for operations it must not expect | `Immediate` commits are documented as "guaranteed to be persistent as soon as `WriteTransaction::commit` returns" (`src/transactions.rs`). `None` carries no expectation and is used as an in-workload negative control. |
 
 ## Known-legal weirdness
 

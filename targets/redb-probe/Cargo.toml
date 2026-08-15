@@ -1,0 +1,14 @@
+# Phase 0 workload: exercises redb's write path so its syscalls can be observed
+# under strace and under shim/build/probe.so. Not used after target selection.
+[package]
+name = "redb-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+redb = "3"
+
+[[bin]]
+name = "redb-probe"
+path = "main.rs"

@@ -5,8 +5,9 @@ trace, enumerates the on-disk states a crash could legally leave behind, replays
 through the target's own recovery path, and checks whether the durability the target
 promised actually held.
 
-> **Status: scaffold. Phase 0 not started.** No results or findings yet; this README is
-> completed in Phase 6.
+> **Status: Phase 0 complete. Phase 1 not started.** Primary target: [redb](https://github.com/cberner/redb).
+> Control: SQLite. No crash states enumerated and no findings yet; this README is completed
+> in Phase 6.
 >
 > Plan: [`docs/EXECUTION-PLAN.md`](docs/EXECUTION-PLAN.md) · Spec: [`CLAUDE.md`](CLAUDE.md)
 
@@ -34,12 +35,15 @@ bun run cf doctor  # verifies the environment can host a run
 | `docs/` | Prior art, target selection, correctness model, coverage, findings, journal |
 | `vm/` | Lima VM definition |
 
+`targets/redb-probe/` is a Phase 0 artifact: a minimal redb workload used to verify that the
+target routes its file I/O through libc.
+
 ## Phase status
 
 | Phase | | |
 |---|---|---|
-| 0 | Prior art, positioning, target selection | Not started |
-| 1 | Trace capture | Blocked on 0 |
+| 0 | Prior art, positioning, target selection | Complete — target=redb, control=sqlite |
+| 1 | Trace capture | Next |
 | 2 | Crash state enumeration | Blocked on 1 |
 | 3 | Recovery and the oracle | Blocked on 2 |
 | 4 | Campaign | Blocked on 3 |

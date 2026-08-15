@@ -11,12 +11,18 @@ CFLAGS  := -std=c11 -O2 -g -Wall -Wextra -Werror -fPIC -pthread \
            -D_GNU_SOURCE -fvisibility=hidden
 LDFLAGS := -shared -ldl -pthread
 
-SRCS := $(wildcard src/*.c)
+# probe.c builds into its own shared object and is excluded from shim.so.
+SRCS := $(filter-out src/probe.c,$(wildcard src/*.c))
 OBJS := $(patsubst src/%.c,$(BUILD)/%.o,$(SRCS))
 
-.PHONY: all clean check-platform
+.PHONY: all probe clean check-platform
 
 all: check-platform $(BUILD)/shim.so
+
+probe: check-platform $(BUILD)/probe.so
+
+$(BUILD)/probe.so: src/probe.c | $(BUILD)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
 
 check-platform:
 	@[ "$$(uname -s)" = "Linux" ] || { \

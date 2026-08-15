@@ -62,11 +62,29 @@ provision:
         }
       done
 
+  # bun and rustup install into the user's home, which is not on PATH for the
+  # non-interactive shells limactl uses. This puts both there for every shell.
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      cat >/etc/profile.d/crashfuzz.sh <<'EOF'
+      export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"
+      EOF
+
   - mode: user
     script: |
       #!/bin/bash
       set -eux -o pipefail
       command -v bun >/dev/null || curl -fsSL https://bun.sh/install | bash
+
+      # The primary target (redb) is Rust; the control (SQLite) ships with the
+      # distribution.
+      if ! command -v rustc >/dev/null && [ ! -x "$HOME/.cargo/bin/rustc" ]; then
+        curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
+        sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable
+        rm -f /tmp/rustup-init.sh
+      fi
 
 probes:
   - description: "bun installed"
@@ -74,4 +92,11 @@ probes:
       #!/bin/bash
       set -eu -o pipefail
       timeout 60s bash -c "until [ -x \"$HOME/.bun/bin/bun\" ]; do sleep 3; done"
+    hint: "Check: limactl shell crashfuzz -- cat /var/log/cloud-init-output.log"
+
+  - description: "rust toolchain installed"
+    script: |
+      #!/bin/bash
+      set -eu -o pipefail
+      timeout 300s bash -c "until [ -x \"$HOME/.cargo/bin/cargo\" ]; do sleep 5; done"
     hint: "Check: limactl shell crashfuzz -- cat /var/log/cloud-init-output.log"

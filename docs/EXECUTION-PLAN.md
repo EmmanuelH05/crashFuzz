@@ -10,15 +10,21 @@ justification. No gate defined in `CLAUDE.md` is relaxed.
 
 ## 1. Positioning
 
-> CrashMonkey tests filesystems. ALICE tests applications but does not scale past a few
-> thousand operations. crashfuzz tests applications, on storage engines those papers
-> predate, within a bound derived from B3's empirical finding that crash-consistency bugs
-> reproduce in three or fewer operations and occur around fsync calls.
+**Revised after Phase 0 research, 2026-08-15.** The original statement claimed ALICE "does
+not scale past a few thousand operations". Pathfinder, the source that claim was attributed
+to, makes only a qualitative statement and no source found supports the number, so it is
+withdrawn. See `docs/journal.md`, Phase 0 entry. The current statement:
+
+> CrashMonkey tests file systems and does not reorder I/O. ALICE tests applications and
+> reorders I/O, but its target set is from 2014 and it needs a hand-written checker per
+> workload. Pathfinder tests applications and scales further than both, on LevelDB, RocksDB
+> and WiredTiger. crashfuzz applies ALICE's reordering model, under B3's empirical bound,
+> to a storage engine none of them tested — redb — with the oracle derived mechanically from
+> the engine's own written durability guarantee rather than hand-written per workload.
 
 The Phase 0 gate requires this to survive the question "why hasn't this already been
-done?". The relevant answer is that it has been done for 2014-era applications on
-2014-era filesystems; the contribution is the target set and the bound, not the technique.
-If Phase 0 research contradicts this, the claim is reduced accordingly.
+done?". The answer is that it largely has been, and the contribution is the target and the
+oracle, not the technique. The full defence is in `docs/prior-art.md`.
 
 ---
 
@@ -172,16 +178,16 @@ Candidate pool for evaluation. `CLAUDE.md` requires these be evaluated rather th
 issues syscalls without going through libc cannot be observed by an `LD_PRELOAD` shim.
 This must be verified before a target is committed to, not discovered during Phase 1.
 
-Exit criteria:
+Exit criteria (all met 2026-08-15):
 
-- [ ] `docs/prior-art.md` covers all five references with the differentiation statement
-- [ ] Positioning statement written and defensible
-- [ ] `docs/target-selection.md` names primary, control, and at least three rejections
-- [ ] **[ADDED]** Primary target's syscall path verified: `strace -f -c` shows the calls,
+- [x] `docs/prior-art.md` covers all five references with the differentiation statement
+- [x] Positioning statement written and defensible
+- [x] `docs/target-selection.md` names primary, control, and at least three rejections
+- [x] **[ADDED]** Primary target's syscall path verified: `strace -f -c` shows the calls,
       and an `LD_PRELOAD` probe observes the same calls
-- [ ] Maintainer activity in the last 90 days recorded with links
+- [x] Maintainer activity in the last 90 days recorded with links
 
-Commit: `phase0: prior art, positioning, target=<X> control=sqlite`
+Commit: `phase0: prior art, positioning, target=redb control=sqlite`
 
 ---
 

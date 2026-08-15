@@ -6,6 +6,7 @@
   "scripts": {
     "cf": "bun run core/src/index.ts",
     "test": "bun test",
+    "test:vm": "bun run core/tools/tdd-report.ts",
     "test:controls": "bun test core/tests/controls",
     "typecheck": "bunx tsc --noEmit",
     "shim": "make -C shim",
