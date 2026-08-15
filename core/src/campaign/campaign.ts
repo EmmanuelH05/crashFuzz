@@ -37,6 +37,8 @@ export type CampaignOptions = {
   dbName: string
   model: FilesystemModel
   filesystem: Filesystem
+  /** Passed to mount -o, from the sweep row. Must match the model. */
+  mountOptions?: string
   seed: number
   /**
    * Runs the target's own recovery against a mounted crash image. Supplied by
@@ -105,12 +107,15 @@ export function runCampaign(options: CampaignOptions): CampaignResult {
       sizeBytes: IMAGE_BYTES,
       casDir: options.casDir,
       rootDir: options.rootDir,
+      mountOptions: options.mountOptions,
     })
 
     // Recovery runs inside the mount, against the filesystem the state was
     // enumerated for. Running it against a copy would test a filesystem the
     // model says nothing about.
-    const recovery = withMount(imagePath, (mountDir) => options.recover(mountDir))
+    const recovery = withMount(imagePath, (mountDir) => options.recover(mountDir), {
+      mountOptions: options.mountOptions,
+    })
 
     statesTested++
 

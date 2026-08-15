@@ -68,6 +68,16 @@ function promisedBefore(ackLog: AckedOperation[], crashStamp: number): AckedOper
 
 export function checkOracle(input: OracleInput): Violation[] {
   const violations: Violation[] = []
+  const promised = promisedBefore(input.ackLog, input.crashStamp)
+
+  // A crash point that was promised nothing cannot have lost anything. Early
+  // crash points catch a target midway through creating its file, and a target
+  // that declines to open a half-created file is behaving correctly rather than
+  // failing recovery. Without this the campaign reports a finding against every
+  // well-behaved target.
+  if (promised.length === 0) {
+    return violations
+  }
 
   if (input.recovery.status === 'failed') {
     // One violation, not one per acknowledged key. A database that will not
@@ -95,7 +105,7 @@ export function checkOracle(input: OracleInput): Violation[] {
     })
   }
 
-  for (const operation of promisedBefore(input.ackLog, input.crashStamp)) {
+  for (const operation of promised) {
     const actual = input.recovery.values.get(operation.key)
 
     if (actual === undefined || actual !== operation.digest) {

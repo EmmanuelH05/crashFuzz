@@ -89,9 +89,11 @@ describe('checkOracle', () => {
   test('reports the target failing its own integrity check, and refusing to open', () => {
     // Two whole-database classes from docs/model.md. Neither is tied to a key,
     // so both carry a null op.
+    // Both classes need something to have been promised before the crash: a
+    // crash point that was promised nothing cannot have lost anything.
     const corrupt = checkOracle({
       crashStamp: 10,
-      ackLog: [],
+      ackLog: [acked({ op: 1, key: 'alpha', acknowledgedAt: 5 })],
       recovery: {
         status: 'opened',
         integrityOk: false,
@@ -100,10 +102,13 @@ describe('checkOracle', () => {
       },
     })
 
-    expect(corrupt).toHaveLength(1)
-    expect(corrupt[0]!.violationClass).toBe('CORRUPT_INVARIANT')
-    expect(corrupt[0]!.op).toBeNull()
-    expect(corrupt[0]!.actual).toBe('wal index corrupt')
+    // The corrupt database also lost the key it was holding, so both classes
+    // fire: they are different claims about the same image.
+    const corruptInvariant = corrupt.find((v) => v.violationClass === 'CORRUPT_INVARIANT')
+    expect(corruptInvariant).toBeDefined()
+    expect(corruptInvariant!.op).toBeNull()
+    expect(corruptInvariant!.actual).toBe('wal index corrupt')
+    expect(corrupt.some((v) => v.violationClass === 'LOST_ACKED')).toBe(true)
 
     const refused = checkOracle({
       crashStamp: 10,
@@ -117,5 +122,23 @@ describe('checkOracle', () => {
     expect(refused).toHaveLength(1)
     expect(refused[0]!.violationClass).toBe('RECOVERY_FAILED')
     expect(refused[0]!.actual).toBe('file is not a database')
+  })
+
+  test('reports no whole-database violation at a crash point that was promised nothing', () => {
+    // Early crash points catch a target midway through creating its file. redb
+    // refuses to open one with "I/O error: invalid data", which is correct: it
+    // is not a database yet. The oracle in docs/model.md is about operations
+    // acknowledged durable before the crash point, and when there are none,
+    // nothing was promised and nothing can have been lost.
+    //
+    // Without this rule the campaign reports a finding for every target that
+    // declines to open a half-created file, which is every well-behaved one.
+    const violations = checkOracle({
+      crashStamp: 7,
+      ackLog: [acked({ op: 1, key: 'alpha', acknowledgedAt: 40 })],
+      recovery: { status: 'failed', detail: 'open: I/O error: invalid data' },
+    })
+
+    expect(violations).toEqual([])
   })
 })

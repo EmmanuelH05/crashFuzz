@@ -50,9 +50,21 @@ fn main() {
         }
     };
 
-    // redb's own checker, not ours.
+    // redb's own checker, and its own contract: Ok(true) means the file passed,
+    // Ok(false) means it failed the check and was repaired, and Err(Corrupted)
+    // means it could not be repaired. Only the last is a failure. Repair after a
+    // crash is redb doing its job -- the docs say it "will automatically detect
+    // and recover from crashes, power loss, and other unclean shutdowns" -- so
+    // treating Ok(false) as corruption reports correct behavior as a bug.
+    //
+    // Whether the repair lost anything acknowledged is a separate question, and
+    // the oracle answers it from the values below rather than from this flag.
     let integrity_ok = match db.check_integrity() {
-        Ok(ok) => ok,
+        Ok(true) => true,
+        Ok(false) => {
+            eprintln!("check_integrity: repaired");
+            true
+        }
         Err(error) => {
             eprintln!("check_integrity: {error}");
             false

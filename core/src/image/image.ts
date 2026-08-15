@@ -29,6 +29,16 @@ export type ImageSpec = {
   sizeBytes: number
 }
 
+export type MountOptions = {
+  /**
+   * Passed to `mount -o`. The journal mode is part of what docs/model.md
+   * describes, so a state enumerated under the ext4 data=journal model must be
+   * mounted that way or it is being tested against a different filesystem than
+   * the one it was enumerated for.
+   */
+  mountOptions?: string
+}
+
 /** Where mount points are made. On the guest disk, never on the repo mount. */
 const MOUNT_ROOT = '/var/lib/crashfuzz/mnt'
 
@@ -75,13 +85,19 @@ export function createImage(spec: ImageSpec): void {
  * unmounts and detaches the loop device, including when the callback throws. A
  * leaked loop device outlives the test process and exhausts /dev/loop*.
  */
-export function withMount<T>(imagePath: string, fn: (mountDir: string) => T): T {
+export function withMount<T>(
+  imagePath: string,
+  fn: (mountDir: string) => T,
+  options: MountOptions = {},
+): T {
   mkdirSync(MOUNT_ROOT, { recursive: true })
   const mountDir = mkdtempSync(`${MOUNT_ROOT}/m-`)
   const loopDevice = capture(['sudo', 'losetup', '--find', '--show', imagePath])
 
   try {
-    run(['sudo', 'mount', loopDevice, mountDir])
+    const mountArgs =
+      options.mountOptions === undefined ? [] : ['-o', options.mountOptions]
+    run(['sudo', 'mount', ...mountArgs, loopDevice, mountDir])
     try {
       // The caller's process is not root, so it has to be able to write here.
       run(['sudo', 'chmod', '0777', mountDir])
@@ -95,12 +111,13 @@ export function withMount<T>(imagePath: string, fn: (mountDir: string) => T): T 
   }
 }
 
-export type MaterializeOptions = ImageSpec & {
-  /** Payload store written during capture. */
-  casDir: string
-  /** Directory the traced paths are relative to. */
-  rootDir: string
-}
+export type MaterializeOptions = ImageSpec &
+  MountOptions & {
+    /** Payload store written during capture. */
+    casDir: string
+    /** Directory the traced paths are relative to. */
+    rootDir: string
+  }
 
 /**
  * Materializes one crash state as an image the target can be pointed at: a
@@ -116,7 +133,15 @@ export function materializeState(
 ): void {
   createImage(options)
 
-  withMount(options.imagePath, (mountDir) => {
-    replaySelection(trace, { casDir: options.casDir, rootDir: options.rootDir, targetDir: mountDir }, state)
-  })
+  withMount(
+    options.imagePath,
+    (mountDir) => {
+      replaySelection(
+        trace,
+        { casDir: options.casDir, rootDir: options.rootDir, targetDir: mountDir },
+        state,
+      )
+    },
+    { mountOptions: options.mountOptions },
+  )
 }

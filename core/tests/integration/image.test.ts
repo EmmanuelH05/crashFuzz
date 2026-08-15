@@ -31,6 +31,33 @@ describe('createImage', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  test('mounts with the journal mode the sweep asked for', () => {
+    // docs/model.md gives ext4 data=ordered and data=journal different rows:
+    // data=journal persists all operations in program order and makes a 4 KiB
+    // overwrite atomic. Enumerating states under the data=journal model and
+    // then mounting data=ordered would test a filesystem the model does not
+    // describe, so the mount option is part of the sweep, not a default.
+    const dir = mkdtempSync(join(SCRATCH, 'test-'))
+    const imagePath = join(dir, 'journal.img')
+
+    try {
+      createImage({ imagePath, filesystem: 'ext4', sizeBytes: 512 * 1024 * 1024 })
+
+      const mode = withMount(
+        imagePath,
+        (mountDir) => {
+          const proc = Bun.spawnSync(['findmnt', '-no', 'OPTIONS', mountDir])
+          return proc.stdout.toString()
+        },
+        { mountOptions: 'data=journal' },
+      )
+
+      expect(mode).toContain('data=journal')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 /**
@@ -98,6 +125,48 @@ describe('materializeState', () => {
 
       expect(contents.a).toEqual(payloadA)
       expect(contents.b).toEqual(payloadB.subarray(0, 512))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('writes the state through the mount options the sweep row uses', () => {
+    // docs/model.md gives ext4 data=journal its own row. Materializing a state
+    // through a data=ordered mount and then recovering it under data=journal
+    // would test a filesystem neither model describes, so the option has to
+    // reach the mount that applies the state, not just the one that reads it.
+    const dir = mkdtempSync(join(SCRATCH, 'test-'))
+    const casDir = join(dir, 'cas')
+    mkdirSync(casDir, { recursive: true })
+    writeFileSync(join(casDir, 'digest-a'), Buffer.alloc(1024, 0xaa))
+
+    const trace: Trace = {
+      header: { version: 1, pid: 1 },
+      events: [event(0, { path: '/db/a', digest: 'digest-a' })],
+      markers: [],
+    }
+
+    const imagePath = join(dir, 'journal-state.img')
+
+    try {
+      materializeState(
+        trace,
+        { crashPoint: 0, persisted: [0], partial: [] },
+        {
+          imagePath,
+          filesystem: 'ext4',
+          sizeBytes: 512 * 1024 * 1024,
+          casDir,
+          rootDir: '/db',
+          mountOptions: 'data=journal',
+        },
+      )
+
+      const entries = withMount(imagePath, (mountDir) => readdirSync(mountDir).sort(), {
+        mountOptions: 'data=journal',
+      })
+
+      expect(entries).toContain('a')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
