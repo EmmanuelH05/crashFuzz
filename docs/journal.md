@@ -407,6 +407,95 @@ enumeration that produced the image can be justified line by line.
 
 ---
 
+## 2026-08-15 — Phase 2: Torn writes, sampling, and real images
+
+### Tried
+
+Closed the four Phase 2 items that were written down but not implemented.
+
+**Torn writes.** The enumerator now produces the sector-aligned prefixes decision 2 permits.
+A write of *n* sectors contributes *n + 1* outcomes (nothing, each prefix, the whole write),
+not 2^*n* subsets. Only `write`, `pwrite` and `writev` can tear; renames and unlinks are
+atomic per the model table.
+
+**Crash point selection.** `selectCrashPoints` implements the `fsyncAdjacent+sample` bound:
+every crash point at or immediately after a persistence call is always selected, the rest
+are sampled at `nonFsyncSampleRate`. Sampling is `splitmix32(seed, index)` — a pure function
+of the seed and the crash point index rather than a running generator, so the selection does
+not depend on iteration order or on which other points were considered. Two seeds over the
+same trace disagree; one seed twice does not.
+
+**Real images.** `createImage` makes a sparse file and a fresh filesystem in it;
+`withMount` attaches a loop device, mounts, runs a callback and always detaches, including
+when the callback throws. `materializeState` composes them with `replaySelection`, which
+applies only the operations a state says persisted, cutting torn ones to their prefix. The
+first end-to-end test makes a real ext4 filesystem, materializes a state with one full write
+and one torn write, and reads both files back out of the mounted image.
+
+**Measurement.** `core/tools/state-explosion.ts` measures the state count against trace
+length, `plots/scripts/state_explosion.py` draws it, and both the data and the figure are
+committed.
+
+### Failed
+
+**The first "unbounded" curve was not unbounded.** The synthetic workload calls `fsync`
+every fifth operation, and an fsync pins every earlier write to the same file, so the free
+set never grew. The curve labelled "no bounds" came out at 1014 states for 18 operations and
+an exponent of 2.44, which would have been presented as evidence that the space is tame
+without the bounds. It is not: with the fsyncs removed the same 18 operations produce 524286
+states, exactly 2^19 - 2. The measurement now uses a workload with no persistence calls for
+the unbounded curve, because a workload that calls fsync is not the worst case.
+
+**Short workloads enumerated nothing.** Traces of one to three operations produced zero
+crash points, because they contain no fsync and the 5% sample almost never fires that few
+times. `maxExhaustiveWorkloadOps` was in `bounds.jsonc` with its justification and was not
+read by any code. It is now applied: a workload within the bound gets every crash point.
+This is the exact case Mohan et al. say most known bugs live in, so sampling it away was the
+worst possible place for that gap.
+
+**The bounded curve has a visible dip at five operations.** At three operations the
+exhaustive bound gives all three crash points; at five it gives one sampled point. The dip
+is the boundary between the two regimes, not noise, and it is left in the figure rather than
+smoothed.
+
+### Learned
+
+The bounded count fits `states ~ ops^1.36` across the whole range and is closer to linear at
+the top end — 500 to 2000 operations is 4x the length for 3.5x the states. 2000 operations
+gives 103732 states over 857 crash points. That is polynomial, so the bounds hold. Without
+them the same enumerator is 2^n and reaches half a million states by operation 18.
+
+### Bound decision: how many operations may be torn in one state
+
+**Reading A: any number.** Physically, every unpersisted write in the window could be
+partially on disk at once. Modelling one at a time describes a machine that tears one write
+and then stops.
+
+**Reading B: one.** The space is the problem. Tearing every operation in the window
+independently multiplies the per-crash-point count by (sectors + 1) per operation instead of
+2, which for the configured window of 8 and a 4 KiB write is a factor of about 10^7.
+
+**Conclusion: B**, recorded as `maxTornOpsPerState` in `bounds.jsonc`. It narrows the space,
+so it loses states rather than inventing them, which is the direction the false-positive
+asymmetry requires. A bug needing two simultaneously torn writes needs one torn write first,
+so the cheaper state is likely to fire before the expensive one is needed.
+
+**Why A was not dismissed entirely:** it is the honest physical model, and the bound is a
+real gap in coverage rather than a free simplification. It belongs in `docs/coverage.md` as
+something not tested, not as something ruled out.
+
+### Gate status
+
+All five Phase 2 boxes are now met: enumeration is deterministic and seed-reproducible and a
+test asserts it; the three-operation hand computation matches; the state count is measured
+and plotted; both controls pass. 39 tests across 12 files.
+
+Not done, and not a Phase 2 gate: there is no `cf enumerate` subcommand, so the bounds reach
+a real captured trace only through `core/tools/state-explosion.ts`, which builds its traces
+synthetically. Phase 3 needs that wiring before it can point recovery at anything.
+
+---
+
 <!--
 Entry template:
 

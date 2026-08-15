@@ -58,4 +58,20 @@ describe('selectCrashPoints', () => {
     expect(sample(7)).toEqual(sample(7))
     expect(sample(7)).not.toEqual(sample(8))
   })
+
+  test('enumerates a short workload exhaustively instead of sampling it', () => {
+    // bounds.jsonc: workloads within maxExhaustiveWorkloadOps are enumerated
+    // exhaustively, because Mohan et al. report 24 of 26 known bugs reproduce
+    // with three or fewer operations. Sampling the crash points of a
+    // three-operation workload would drop most of that space for no saving.
+    const short: Trace = { ...TRACE, events: TRACE.events.slice(0, 3) }
+
+    const selected = selectCrashPoints(short, {
+      nonFsyncSampleRate: 0,
+      seed: 1,
+      maxExhaustiveWorkloadOps: 3,
+    })
+
+    expect(selected).toEqual([0, 1, 2])
+  })
 })

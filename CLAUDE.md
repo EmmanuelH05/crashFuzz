@@ -144,10 +144,10 @@ Turn one trace into the set of legal post-crash disk images.
 
 Completion conditions:
 
-- [ ] Enumeration is deterministic and seed-reproducible
+- [x] Enumeration is deterministic and seed-reproducible
 - [x] A synthetic 3-operation trace produces exactly the hand-computed state count. Show
       the hand computation in the test file.
-- [ ] State count vs. trace length is measured and plotted. If it is not roughly
+- [x] State count vs. trace length is measured and plotted. If it is not roughly
       polynomial under the bounds, the bounds are wrong.
 - [x] A deliberately reordered-unsafe toy workload is correctly flagged (positive control)
 - [x] A correctly-fsynced toy workload is not flagged (negative control)
@@ -266,9 +266,9 @@ Execution plan: `docs/EXECUTION-PLAN.md`. Decision rationale: `docs/journal.md`.
 
 ## Current state
 
-Last code commit: `294c936`, 2026-08-15; anything after it is documentation. Phases 0 and 1
-are complete, Phase 2 is partly done, and anything below marked "not done" is the next work.
-Update this line when code lands, or it will describe a tree that no longer exists.
+Last code commit: `65f5535`, 2026-08-15, plus the Phase 2 measurement and plot on top of it.
+Phases 0, 1 and 2 are complete; Phase 3 has not started. Update this line when code lands,
+or it will describe a tree that no longer exists.
 
 This section is a summary and goes stale. Everything above it is the spec and outranks it.
 Where it disagrees with another document, the other document wins:
@@ -290,7 +290,7 @@ If a claim here cannot be traced to one of those, treat it as unverified.
 |---|---|
 | 0 — Prior art, positioning, target selection | Complete |
 | 1 — Trace capture | Complete, all five exit criteria met |
-| 2 — Crash state enumeration | Partial: 3 of 5 exit criteria met |
+| 2 — Crash state enumeration | Complete, all five exit criteria met |
 | 3–6 | Not started |
 
 Target: **redb** (Rust, Apache-2.0, `github.com/cberner/redb`). Control: **SQLite** (WAL,
@@ -300,6 +300,8 @@ Target: **redb** (Rust, Apache-2.0, `github.com/cberner/redb`). Control: **SQLit
 Commits, newest first:
 
 ```text
+65f5535 phase2: materialize crash states as real loopback filesystem images
+ee04adf phase2: torn writes, seeded crash point sampling, determinism test
 294c936 phase2: filesystem models, crash state enumeration, controls
 1571c38 docs: persistence model decisions argued and transcribed
 13e4624 phase1: open flags, wall time, replay, format spec; all exit criteria met
@@ -319,16 +321,21 @@ Commits, newest first:
 | `core/src/trace/reader.ts` | Parses trace v1 into typed events and markers, sorted by submission stamp. |
 | `core/src/trace/replay.ts` | Applies a trace to a directory without the target present. |
 | `core/src/graph/models.ts` | ext4-ordered, ext4-journal, xfs, btrfs. One flag per row of `docs/model.md`. |
-| `core/src/enumerate/states.ts` | Crash state enumeration per crash point. |
+| `core/src/enumerate/states.ts` | Crash state enumeration per crash point, including torn writes. |
+| `core/src/enumerate/crash-points.ts` | Which crash points to enumerate: fsync-adjacent plus a seeded sample. |
 | `core/src/enumerate/bounds.jsonc` | Bound values with the justification for each beside it. |
+| `core/src/enumerate/bounds.ts` | Loads `bounds.jsonc`, comments and all. |
+| `core/src/image/image.ts` | Makes, mounts and materializes crash images on loop devices. |
+| `core/tools/state-explosion.ts` | Measures state count against trace length into `plots/data/`. |
 | `core/tools/tdd-report.ts` | Runs `bun test` in the VM and writes tdd-guard's `test.json`. |
+| `plots/scripts/state_explosion.py` | Draws `plots/out/state-explosion.png` from that data. |
 | `targets/redb-probe/` | Small Rust workload used for the Phase 0 syscall-path check. |
 
 Docs written: `prior-art.md`, `target-selection.md`, `model.md`, `trace-format.md`,
-`coverage.md`, `journal.md` (four entries). `findings.md` is still a stub, correctly, since
+`coverage.md`, `journal.md` (five entries). `findings.md` is still a stub, correctly, since
 nothing has been found.
 
-28 tests across 6 files, all passing.
+39 tests across 12 files, all passing.
 
 ### Trace format v1, in one paragraph
 
@@ -340,25 +347,24 @@ from one counter in a `MAP_SHARED` page, so forked children continue the same se
 Writes to a file named `crashfuzz.marker` become `marker` records and are excluded from the
 target's data path. Full spec: `docs/trace-format.md`.
 
-### Phase 2: what is left
+### What Phase 2 measured
 
-- [ ] Enumeration is deterministic and seed-reproducible. The enumerator is deterministic by
-      construction (fixed iteration order, no randomness) but no test asserts it, and
-      sampling is not implemented yet, which is where a seed will be needed.
-- [ ] State count vs. trace length measured and plotted. `plots/` is still empty. The script
-      and its output are both committed, per the tooling rules above.
-- [ ] Torn-write states. `bounds.jsonc` specifies prefix-or-nothing at 512 bytes; the
-      enumerator ignores the flag so far.
-- [ ] The sampling bounds (`crashPoints`, `nonFsyncSampleRate`, `maxExhaustiveWorkloadOps`)
-      are written down but not applied to real traces.
-- [ ] Materializing a state as a real image: sparse file, make the filesystem, `losetup`,
-      mount, apply the persisted subset, unmount, detach, snapshot. None of this exists yet
-      and it is the bulk of the remaining Phase 2 work. `core/src/trace/replay.ts` is the
-      application step it should call.
+Bounded, the state count fits `states ~ ops^1.36` and is closer to linear at the top end:
+2000 operations gives 103732 states over 857 crash points. Unbounded, on a workload with no
+`fsync` at all, the same enumerator is 2^n and reaches 524286 states by operation 18. Data in
+`plots/data/`, figure in `plots/out/state-explosion.png`, regenerate with `bun run measure`
+then `bun run plots`.
 
-The two Phase 2 controls that pass are unit-level: they check that the enumerator produces,
-or does not produce, the rename-without-data state. They do not yet run against a real
-filesystem image.
+### Phase 2: what was deliberately left out
+
+- The two enumeration controls are unit-level. They check that the enumerator produces, or
+  does not produce, the rename-without-data state. Materialization is tested separately
+  against a real ext4 image; the controls do not yet run end to end through one.
+- There is no `cf enumerate` subcommand, so the bounds reach a real captured trace only
+  through `core/tools/state-explosion.ts`, which builds its traces synthetically. Phase 3
+  needs that wiring before it can point recovery at anything.
+- `maxTornOpsPerState` is 1 and the non-fsync crash point sample is 5%. Both narrow the
+  space and both are recorded as gaps in `docs/coverage.md`.
 
 ### Environment
 
@@ -403,6 +409,16 @@ Scratch state on the guest disk, not in the repo:
 
 6. **The shim's marker handling applies at open as well as write.** A marker file traced as
    target I/O puts an operation in the graph that the target never performed.
+
+7. **A leaked loop device outlives the process that made it.** `withMount` detaches in a
+   `finally` for that reason. Anything that attaches a loop device outside it must do the
+   same, or a few hundred crash states will exhaust `/dev/loop*` and every later mount fails
+   for a reason that looks nothing like the cause.
+
+8. **`/var/lib/crashfuzz` and everything under it must be world-writable.** The test suite
+   runs unprivileged and creates image and mount directories directly; only the mount itself
+   goes through `sudo`. `vm/lima.yaml` now chmods recursively. A VM provisioned before that
+   change has `images/` and `mnt/` owned by root and materialization fails with `EACCES`.
 
 ### Decisions a new session should not relitigate
 

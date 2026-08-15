@@ -18,6 +18,11 @@ export type SelectionOptions = {
   nonFsyncSampleRate: number
   /** Fixes the sample. The same seed and trace select the same crash points. */
   seed: number
+  /**
+   * Workloads no longer than this are enumerated exhaustively rather than
+   * sampled. See bounds.jsonc. Omitted means always sample.
+   */
+  maxExhaustiveWorkloadOps?: number
 }
 
 /**
@@ -28,6 +33,11 @@ export type SelectionOptions = {
  */
 export function selectCrashPoints(trace: Trace, options: SelectionOptions): number[] {
   const selected: number[] = []
+
+  const exhaustive = options.maxExhaustiveWorkloadOps ?? 0
+  if (trace.events.length <= exhaustive) {
+    return trace.events.map((_, index) => index)
+  }
 
   for (let index = 0; index < trace.events.length; index++) {
     const isPersistence = PERSISTENCE.has(trace.events[index]!.call)

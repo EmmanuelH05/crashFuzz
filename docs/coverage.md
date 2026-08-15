@@ -35,6 +35,20 @@
   a persistence call leaves the model's domain and is rejected at ingest rather than
   analyzed.
 
+- **States where two or more writes are torn at once.** `maxTornOpsPerState` in
+  `core/src/enumerate/bounds.jsonc` is 1, so a state has at most one operation on disk as a
+  partial prefix. Physically any number of unpersisted writes could be partial at the same
+  time; enumerating that multiplies the per-crash-point count by roughly (sectors + 1) per
+  operation in the window instead of 2. A bug reachable only through two simultaneously torn
+  writes is not reachable by this tool. Argued in `docs/journal.md`, Phase 2 entry.
+
+- **Crash points not adjacent to a persistence call, in workloads longer than
+  `maxExhaustiveWorkloadOps`.** These are sampled at `nonFsyncSampleRate` (5%), so 95% of
+  them are never enumerated. Justified by Mohan et al.'s finding that every bug they
+  reproduced involved a crash right after a persistence point, but that is a statement about
+  the bugs they found, not a proof about the ones they did not. The sample is seeded, so a
+  wider sweep re-runs the same trace with a different seed rather than repeating this one.
+
 ## Write-path coverage
 
 Phase 4: build the target with coverage instrumentation and report which write-path

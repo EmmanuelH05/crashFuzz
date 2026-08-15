@@ -1,0 +1,10 @@
+{
+  "boundedExponent": 1.362884264157877,
+  "unboundedExponent": 5.05113325631051,
+  "largestBounded": {
+    "operations": 2000,
+    "regime": "bounded",
+    "crashPoints": 857,
+    "states": 103732
+  }
+}

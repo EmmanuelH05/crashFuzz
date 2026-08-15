@@ -13,7 +13,8 @@
     "vm:up": "limactl start --name=crashfuzz vm/lima.yaml",
     "vm:sh": "limactl shell crashfuzz",
     "vm:down": "limactl stop crashfuzz",
-    "plots": "python3 plots/scripts/render_all.py"
+    "measure": "bun run core/tools/state-explosion.ts",
+    "plots": "python3 plots/scripts/state_explosion.py"
   },
   "devDependencies": {
     "@types/bun": "latest"
