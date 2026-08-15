@@ -34,7 +34,27 @@ fdatasync                          the commit
 ```
 
 The failing states drop an `ftruncate` issued after the last `fdatasync`, and keep a later
-write.
+write. In the packaged state, every earlier `ftruncate` persisted — each was pinned by an
+`fdatasync` — and only the last one did not:
+
+| `ftruncate` | New length | Persisted |
+|---|---|---|
+| stamp 3 | 1,056,768 | yes |
+| stamp 42 | 2,109,440 | yes |
+| stamp 60 | 4,214,784 | yes |
+| stamp 126 | 8,425,472 | yes |
+| stamp 272 | 16,846,848 | **no** |
+
+The resulting image is 8,650,240 bytes carrying a header that describes the 16 MiB layout.
+The finding reproduces from the packaged image alone: mount it, run `redb-query`, and redb
+aborts.
+
+The same trace produces the finding on ext4 `data=ordered` and on xfs, and produces nothing
+on ext4 `data=journal`, whose model persists operations in program order and therefore
+cannot drop the `ftruncate` while keeping a later write. That the finding appears exactly
+where the model permits the reordering, and nowhere else, is evidence that it comes from the
+modelled reordering rather than from a harness accident — but it is not evidence that the
+reordering is one ext4 actually performs.
 
 **Why this is not filed.** The question that decides it is whether ext4 `data=ordered` can
 leave a data write persisted while an earlier `ftruncate` on the same file is not, with no
