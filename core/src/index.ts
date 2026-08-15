@@ -5,6 +5,14 @@
  * Subcommands are implemented per phase; see docs/EXECUTION-PLAN.md.
  */
 
+import { readFileSync } from 'node:fs'
+import { loadBounds } from './enumerate/bounds'
+import { selectCrashPoints } from './enumerate/crash-points'
+import { sampleStates } from './enumerate/sample'
+import { enumerateCrashStates } from './enumerate/states'
+import { MODELS } from './graph/models'
+import { parseTrace } from './trace/reader'
+
 const COMMANDS = {
   trace: 'Capture a syscall trace from a target workload (Phase 1)',
   enumerate: 'Enumerate legal crash states from a trace (Phase 2)',
@@ -50,6 +58,52 @@ function doctor(): number {
   return failed.length === 0 ? 0 : 1
 }
 
+/**
+ * Reports what the bounds select for a trace, per filesystem model, without
+ * materializing anything. This is the number that decides whether a sweep is
+ * worth starting: a trace that enumerates twenty states is not worth two hours
+ * of loop devices.
+ */
+function enumerate(tracePath: string | undefined): number {
+  if (tracePath === undefined) {
+    console.error('usage: bun run cf enumerate <trace.jsonl>')
+    return 2
+  }
+
+  const bounds = loadBounds()
+  const trace = parseTrace(readFileSync(tracePath, 'utf8'))
+  const crashPoints = selectCrashPoints(trace, {
+    nonFsyncSampleRate: bounds.nonFsyncSampleRate,
+    maxExhaustiveWorkloadOps: bounds.maxExhaustiveWorkloadOps,
+    seed: 1,
+  })
+
+  console.log(`${trace.events.length} events, ${crashPoints.length} crash points selected\n`)
+  console.log('model            crash points   states   materialized')
+
+  for (const model of MODELS) {
+    const states = enumerateCrashStates(trace, {
+      model,
+      bounds: {
+        tornWrites: bounds.tornWrites,
+        maxUnpersistedWindow: bounds.maxUnpersistedWindow,
+      },
+      crashPoints,
+    })
+    const sampled = sampleStates(states, {
+      maxPerCrashPoint: bounds.maxStatesPerCrashPoint,
+      seed: 1,
+    })
+
+    console.log(
+      `${model.name.padEnd(17)}${String(crashPoints.length).padStart(12)}` +
+        `${String(states.length).padStart(9)}${String(sampled.length).padStart(15)}`,
+    )
+  }
+
+  return 0
+}
+
 function usage(): void {
   console.log('crashfuzz - application-level crash-consistency checker\n')
   console.log('Usage: bun run cf <command>\n')
@@ -75,6 +129,10 @@ function main(argv: string[]): number {
 
   if (command === 'doctor') {
     return doctor()
+  }
+
+  if (command === 'enumerate') {
+    return enumerate(argv[3])
   }
 
   console.error(`Not implemented: ${command} (${COMMANDS[command as Command]})`)
