@@ -1,0 +1,29 @@
+// Bounds on the crash state space. Each value carries its justification here,
+// per the Phase 2 requirement in CLAUDE.md.
+{
+  // Mohan et al. (OSDI '18): "all reported bugs involved a crash right after a
+  // persistence point". Other crash points get a stratified sample instead of
+  // exhaustive coverage.
+  "crashPoints": "fsyncAdjacent+sample",
+
+  // Fraction of non-fsync-adjacent crash points sampled. Chosen so a 10k
+  // operation trace contributes about 500 extra crash points rather than 10k.
+  "nonFsyncSampleRate": 0.05,
+
+  // Caps the per-crash-point state set at 2^8 = 256. Operations older than the
+  // window are treated as persisted, which is what a durability floor would
+  // eventually force anyway.
+  "maxUnpersistedWindow": 8,
+
+  // Mohan et al.: 24 of 26 known bugs reproduce with three or fewer operations.
+  // Workloads within this length are enumerated exhaustively, longer ones are
+  // sampled.
+  "maxExhaustiveWorkloadOps": 3,
+
+  // Torn writes are modeled as prefix-or-nothing at sector granularity.
+  // Pillai et al.: single-sector overwrites are atomic on every filesystem
+  // tested, and a large write persists as a prefix rather than an arbitrary
+  // subset. See docs/model.md, decision 2.
+  "tornWrites": true,
+  "tornWriteGranularityBytes": 512
+}

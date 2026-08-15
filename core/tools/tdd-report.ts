@@ -48,7 +48,7 @@ type TestRunOutput = {
  * Runs bun test where the filesystem semantics under test exist. On macOS that
  * is the Lima VM; on Linux it is the current machine.
  */
-function runTests(args: string[]): { output: string; junit: string } {
+function runTests(args: string[]): { output: string; junit: string; exitCode: number } {
   const bunArgs = ['test', ...args, '--reporter=junit', `--reporter-outfile=${JUNIT_PATH}`]
 
   // bun writes no JUnit file when a test module fails to load, so the previous
@@ -70,6 +70,7 @@ function runTests(args: string[]): { output: string; junit: string } {
   return {
     output: proc.stdout.toString() + proc.stderr.toString(),
     junit: junit.stdout.toString(),
+    exitCode: proc.exitCode ?? 1,
   }
 }
 
@@ -158,11 +159,20 @@ function parseJunit(xml: string, consoleOutput: string): TestRunOutput {
 
 function main(argv: string[]): number {
   const args = argv.slice(2)
-  const { output, junit } = runTests(args)
+  const { output, junit, exitCode } = runTests(args)
 
   console.log(output)
 
   const result = junit.trim() === '' ? loadFailure(output) : parseJunit(junit, output)
+
+  // A module that fails to load contributes no test cases, so a run can exit
+  // non-zero with nothing marked failed. That is recorded as a failure rather
+  // than reported as a pass.
+  const hasFailure = result.testModules.some((m) => m.tests.some((t) => t.state === 'failed'))
+  if (exitCode !== 0 && !hasFailure) {
+    result.testModules.push(loadFailure(output).testModules[0]!)
+    result.reason = 'failed'
+  }
   mkdirSync(dirname(OUT_PATH), { recursive: true })
   writeFileSync(OUT_PATH, JSON.stringify(result, null, 2))
 
