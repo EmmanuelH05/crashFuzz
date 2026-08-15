@@ -25,5 +25,11 @@
   // tested, and a large write persists as a prefix rather than an arbitrary
   // subset. See docs/model.md, decision 2.
   "tornWrites": true,
-  "tornWriteGranularityBytes": 512
+  "tornWriteGranularityBytes": 512,
+
+  // At most one operation is torn in any one state. Tearing every operation in
+  // the window independently multiplies the space by (sectors + 1) per
+  // operation; a bug needing two simultaneously torn writes needs one first.
+  // Narrows the space, so it loses states rather than inventing them.
+  "maxTornOpsPerState": 1
 }

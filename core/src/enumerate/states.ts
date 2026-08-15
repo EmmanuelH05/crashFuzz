@@ -19,6 +19,11 @@ export type Bounds = {
 export type EnumerateOptions = {
   model: FilesystemModel
   bounds: Bounds
+  /**
+   * Crash points to enumerate, from selectCrashPoints. Every crash point in the
+   * trace when omitted.
+   */
+  crashPoints?: number[]
 }
 
 export type CrashState = {
@@ -26,7 +31,15 @@ export type CrashState = {
   crashPoint: number
   /** Indices of the operations present on disk in this state. */
   persisted: number[]
+  /** Operations present as a sector-aligned prefix of their payload. */
+  partial: { op: number; bytes: number }[]
 }
+
+/**
+ * Sector size a torn write is truncated to. docs/model.md: no filesystem in the
+ * sweep is reported to tear below a sector.
+ */
+const SECTOR_BYTES = 512
 
 /** Calls that change file contents or the directory tree. */
 const MUTATING: ReadonlySet<string> = new Set([
@@ -66,6 +79,22 @@ function pinnedBy(events: TraceEvent[], upto: number): Set<number> {
 }
 
 /**
+ * Sector-aligned prefix lengths of a write's payload, excluding nothing and the
+ * whole payload, which are the state's two untorn cases. Only writes carry a
+ * payload that can tear; a rename or an unlink is atomic per docs/model.md.
+ */
+function strictSectorPrefixes(event: TraceEvent): number[] {
+  if (event.call !== 'write' && event.call !== 'pwrite' && event.call !== 'writev') return []
+
+  const sectors = Math.ceil(event.length / SECTOR_BYTES)
+  const prefixes: number[] = []
+  for (let sector = 1; sector < sectors; sector++) {
+    prefixes.push(sector * SECTOR_BYTES)
+  }
+  return prefixes
+}
+
+/**
  * Enumerates the legal crash states of a trace, one group per crash point.
  * Deterministic: states come out in a fixed order for a given trace, model and
  * bounds, so a run is reproducible without a seed.
@@ -74,7 +103,10 @@ export function enumerateCrashStates(trace: Trace, options: EnumerateOptions): C
   const events = trace.events
   const states: CrashState[] = []
 
-  for (let crashPoint = 0; crashPoint < events.length; crashPoint++) {
+  const crashPoints =
+    options.crashPoints ?? Array.from({ length: events.length }, (_, index) => index)
+
+  for (const crashPoint of crashPoints) {
     const pinned = pinnedBy(events, crashPoint)
 
     const free: number[] = []
@@ -94,7 +126,7 @@ export function enumerateCrashStates(trace: Trace, options: EnumerateOptions): C
       for (let take = 0; take <= issued.length; take++) {
         const persisted = issued.slice(0, take)
         if (alwaysPresent.every((index) => persisted.includes(index))) {
-          states.push({ crashPoint, persisted })
+          states.push({ crashPoint, persisted, partial: [] })
         }
       }
       continue
@@ -105,7 +137,20 @@ export function enumerateCrashStates(trace: Trace, options: EnumerateOptions): C
       for (let bit = 0; bit < window.length; bit++) {
         if (mask & (1 << bit)) persisted.push(window[bit]!)
       }
-      states.push({ crashPoint, persisted: persisted.sort((a, b) => a - b) })
+      persisted.sort((a, b) => a - b)
+      states.push({ crashPoint, persisted, partial: [] })
+
+      if (!options.bounds.tornWrites) continue
+
+      // An operation absent from this state may instead be on disk as a
+      // sector-aligned prefix of its payload. Whole and absent are the mask's
+      // own two cases, so only the strict prefixes are added here.
+      for (const op of window) {
+        if (persisted.includes(op)) continue
+        for (const bytes of strictSectorPrefixes(events[op]!)) {
+          states.push({ crashPoint, persisted, partial: [{ op, bytes }] })
+        }
+      }
     }
   }
 
