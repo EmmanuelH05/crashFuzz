@@ -161,10 +161,12 @@ Completion conditions:
 
 Completion conditions:
 
-- [ ] Control target (SQLite) reports zero violations across the full bounded space. If it
+- [x] Control target (SQLite) reports zero violations across the full bounded space. If it
       does not, the oracle is broken. Fix the oracle. Do not report the finding.
-- [ ] Every violation reproduces on a clean machine from the artifact alone
-- [ ] Violations are automatically deduplicated by root-cause signature, not by message
+- [ ] Every violation reproduces on a clean machine from the artifact alone. The artifact is
+      built and executed by a test, but no real violation has been packaged, because none
+      has been found.
+- [x] Violations are automatically deduplicated by root-cause signature, not by message
       string
 - [x] `docs/model.md` has a "known-legal weirdness" section with at least one real entry
 
@@ -266,9 +268,9 @@ Execution plan: `docs/EXECUTION-PLAN.md`. Decision rationale: `docs/journal.md`.
 
 ## Current state
 
-Last code commit: `65f5535`, 2026-08-15, plus the Phase 2 measurement and plot on top of it.
-Phases 0, 1 and 2 are complete; Phase 3 has not started. Update this line when code lands,
-or it will describe a tree that no longer exists.
+Last code commit: `addbf3b`, 2026-08-15. Phases 0, 1 and 2 are complete; Phase 3 is complete
+except for packaging a real violation, since none has been found. Update this line when code
+lands, or it will describe a tree that no longer exists.
 
 This section is a summary and goes stale. Everything above it is the spec and outranks it.
 Where it disagrees with another document, the other document wins:
@@ -291,7 +293,8 @@ If a claim here cannot be traced to one of those, treat it as unverified.
 | 0 — Prior art, positioning, target selection | Complete |
 | 1 — Trace capture | Complete, all five exit criteria met |
 | 2 — Crash state enumeration | Complete, all five exit criteria met |
-| 3–6 | Not started |
+| 3 — Recovery and the oracle | 3 of 4 exit criteria met; no real violation has been packaged because none has been found |
+| 4–6 | Not started |
 
 Target: **redb** (Rust, Apache-2.0, `github.com/cberner/redb`). Control: **SQLite** (WAL,
 `synchronous=FULL`). Rationale and the six rejected candidates are in
@@ -325,17 +328,27 @@ ee04adf phase2: torn writes, seeded crash point sampling, determinism test
 | `core/src/enumerate/crash-points.ts` | Which crash points to enumerate: fsync-adjacent plus a seeded sample. |
 | `core/src/enumerate/bounds.jsonc` | Bound values with the justification for each beside it. |
 | `core/src/enumerate/bounds.ts` | Loads `bounds.jsonc`, comments and all. |
+| `core/src/enumerate/sample.ts` | Seeded sampling of states down to what can be materialized. |
 | `core/src/image/image.ts` | Makes, mounts and materializes crash images on loop devices. |
+| `core/src/oracle/acklog.ts` | Marker channel to logical operations and their durability promise. |
+| `core/src/oracle/oracle.ts` | The four violation classes of `docs/model.md`. |
+| `core/src/oracle/dedup.ts` | Root-cause signature: the earliest dependency the state dropped. |
+| `core/src/oracle/recover.ts` | Runs a target's own recovery and reads back value digests. |
+| `core/src/oracle/reproducer.ts` | Packages a finding as image, trace prefix, and a run script. |
+| `core/src/campaign/campaign.ts` | The whole pipeline for one trace. |
+| `targets/sqlite-workload/` | The control: WAL, `synchronous=FULL`, plus its query tool. |
+| `targets/unsafe-kv/` | The positive control: rename-over-file with no fsync, acked durable. |
 | `core/tools/state-explosion.ts` | Measures state count against trace length into `plots/data/`. |
 | `core/tools/tdd-report.ts` | Runs `bun test` in the VM and writes tdd-guard's `test.json`. |
 | `plots/scripts/state_explosion.py` | Draws `plots/out/state-explosion.png` from that data. |
 | `targets/redb-probe/` | Small Rust workload used for the Phase 0 syscall-path check. |
 
 Docs written: `prior-art.md`, `target-selection.md`, `model.md`, `trace-format.md`,
-`coverage.md`, `journal.md` (five entries). `findings.md` is still a stub, correctly, since
+`coverage.md`, `journal.md` (six entries). `findings.md` is still a stub, correctly, since
 nothing has been found.
 
-39 tests across 12 files, all passing.
+56 tests across 20 files, all passing. The two control tests are the slow ones: each
+materializes hundreds of real filesystem images.
 
 ### Trace format v1, in one paragraph
 
@@ -347,6 +360,18 @@ from one counter in a `MAP_SHARED` page, so forked children continue the same se
 Writes to a file named `crashfuzz.marker` become `marker` records and are excluded from the
 target's data path. Full spec: `docs/trace-format.md`.
 
+### What Phase 3 established
+
+The SQLite control tests 376 states over 23 crash points on ext4 `data=ordered` and reports
+zero violations. The positive control, a deliberately unsafe application that renames over a
+file without fsyncing and announces durability anyway, is detected on xfs and packages into
+a runnable reproducer. Neither result means much alone: a clean control proves nothing if
+the oracle never fires, and the positive control is what shows it does.
+
+Four false-positive sources were found by the control before anything was reported to
+anyone. They are written up in the Phase 3 journal entry, and the one that mattered most was
+in `bounds.jsonc` describing behavior the enumerator did not implement.
+
 ### What Phase 2 measured
 
 Bounded, the state count fits `states ~ ops^1.36` and is closer to linear at the top end:
@@ -354,6 +379,14 @@ Bounded, the state count fits `states ~ ops^1.36` and is closer to linear at the
 `fsync` at all, the same enumerator is 2^n and reaches 524286 states by operation 18. Data in
 `plots/data/`, figure in `plots/out/state-explosion.png`, regenerate with `bun run measure`
 then `bun run plots`.
+
+### Phase 3: what was deliberately left out
+
+- The campaign runs one filesystem and one workload shape per call. Sweeping is Phase 4.
+- `cf` still has no subcommands; the pipeline is reached from tests and from
+  `core/tools/state-explosion.ts`.
+- `maxStatesPerCrashPoint` is 24, so a crash point that enumerates thousands of states has
+  most of them dropped. Recorded in `docs/coverage.md`.
 
 ### Phase 2: what was deliberately left out
 

@@ -49,6 +49,17 @@
   the bugs they found, not a proof about the ones they did not. The sample is seeded, so a
   wider sweep re-runs the same trace with a different seed rather than repeating this one.
 
+- **Most states at any crash point that enumerates more than 24.** `maxStatesPerCrashPoint`
+  in `core/src/enumerate/bounds.jsonc` caps how many states are materialized, because a
+  state costs microseconds to enumerate and a filesystem creation, a loop device, two mounts
+  and a target recovery to test. The first and last state of each crash point are always
+  kept; the rest are a seeded sample. A different seed tests a different subset.
+
+- **Everything after the crash point in a recovered image.** Recovery runs against the image
+  and may write to it. The oracle reads the result once and does not check what recovery
+  itself wrote, so a target that recovers correctly but corrupts the image on a second open
+  would not be caught.
+
 ## Write-path coverage
 
 Phase 4: build the target with coverage instrumentation and report which write-path

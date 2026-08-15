@@ -496,6 +496,94 @@ synthetically. Phase 3 needs that wiring before it can point recovery at anythin
 
 ---
 
+## 2026-08-15 — Phase 3: The oracle, and what the control caught
+
+### Tried
+
+The pipeline now runs end to end: trace, crash points, states, images, the
+target's own recovery, oracle, deduplicated findings, reproducer artifact.
+
+**The ack log.** `docs/model.md` says acknowledgement comes from the driver's logical
+operation log, correlated by the marker channel. `parseAckLog` reads markers into one record
+per logical operation, carrying `durable=1` or `durable=0`. An operation with no ack marker
+is kept with `acknowledgedAt: null` rather than dropped, so the oracle can tell "never
+promised" from "not in the log".
+
+**The workload.** `targets/sqlite-workload` commits one row per operation at WAL and
+`synchronous=FULL`, writing a marker either side. A test asserts that every ack marker is
+stamped after an fsync that returned, which is what makes the marker a durability claim
+rather than a timestamp. That test is the load-bearing one: if an ack could be stamped
+before the fsync that earns it, every violation this tool reports would be suspect.
+
+**The oracle.** `checkOracle` reports only what the contract plainly forbids.
+`RECOVERY_FAILED` is one finding rather than one per key, because a database that will not
+open loses all of them through a single root cause.
+
+**Dedup.** `signatureOf` blames the earliest operation the acknowledgement depended on that
+the state did not persist, with offsets excluded, so the same missing write at page 4 and
+page 900 is one bug rather than two.
+
+**The positive control.** `targets/unsafe-kv` is a deliberately broken application: write a
+temporary file, rename it over the real name, announce durability, never fsync. The tool
+finds the lost value on xfs and packages it as a reproducer.
+
+### Failed
+
+The control run reported violations on the first attempt. Per CLAUDE.md that means the
+oracle is broken, and it was. Four defects, all ours, none SQLite's:
+
+1. **Operations older than the unpersisted window were dropped from every state.**
+   `bounds.jsonc` says they are "treated as persisted"; the enumerator neither persisted them
+   nor put them in the mask, so they were in no state at all. Every acknowledgement that
+   depended on an early WAL write looked lost in every image. This was the largest source.
+
+2. **A file-existence rule deleted the positive control.** After fixing (1) the run failed
+   materializing a state that truncated a file whose creating write it had dropped. The first
+   fix required any metadata operation to have an earlier persisted write on its path, which
+   promptly broke the rename-without-data control — the exact state the tool exists to find.
+   `open(O_CREAT)` creates the inode, so a name can reach the disk while the bytes behind it
+   do not. The rule now covers only the size-changing calls, and replay creates the empty
+   inode for the rest.
+
+3. **An image from before the database existed was reported as `RECOVERY_FAILED`.** Early
+   crash points predate the file. The target cannot be blamed for refusing to open a file the
+   crash point precedes, and nothing is acknowledged that early. Reported as an empty
+   database instead, which leaves the oracle free to flag anything acknowledged and missing.
+
+4. **A trace with no persistence call had almost every crash point sampled away.** Found by
+   the positive control, which tested zero states on its first run. The B3 bound concentrates
+   on crash points next to a persistence call because that is where Mohan et al. found every
+   bug; a workload that never calls fsync has none, so the argument says nothing and the 5%
+   sample skipped the trace. An application that promises durability without ever calling
+   fsync is exactly the bug class this project hunts, so it was the worst possible thing to
+   drop. Such traces now enumerate every crash point.
+
+Three of the four would have produced false positives against a real target. The fourth
+would have produced silence. The control caught all of them before any of them reached a
+maintainer, which is the entire argument for having a control.
+
+### Learned
+
+A clean control run is worth nothing on its own. An oracle that never fires passes it
+trivially, and would pass it just as happily if the pipeline were disconnected. The clean run
+and the positive control only mean something as a pair, and the positive control is the one
+that took the least effort and caught the subtlest gap.
+
+The SQLite control tests 376 states over 23 crash points on ext4 `data=ordered` and reports
+zero violations. The unsafe control reports the lost value on xfs.
+
+### Gate status
+
+Phase 3 exit criteria: the control reports zero violations; violations are deduplicated by
+root-cause signature; `docs/model.md` has its known-legal weirdness section. Reproducers are
+built and executed by a test, but no real violation has ever been packaged, because none has
+been found — the artifact mechanism is proven, its application to a genuine finding is not.
+
+Not done, and deliberately: the campaign does not sweep filesystems or workload shapes, and
+`cf` still has no subcommands. Both are Phase 4.
+
+---
+
 <!--
 Entry template:
 
