@@ -584,6 +584,75 @@ Not done, and deliberately: the campaign does not sweep filesystems or workload 
 
 ---
 
+## 2026-08-15 — Phase 4: The campaign
+
+### Tried
+
+The primary target finally gets tested. `targets/redb-workload` is a Rust crate with two
+binaries: the workload, which commits through redb and emits the marker channel, and the
+query tool, which opens a crash image and reports redb's own integrity check and the digest
+of every value it can read. Five shapes — single-writer, 256 KiB values, 64 byte values,
+mixed durability, and four contending writers — cross four filesystem configurations.
+
+The mount option is threaded through both mounts, not just the one that recovers. A state
+enumerated under the ext4 `data=journal` model is materialized through a `data=journal`
+mount, because applying it through `data=ordered` and recovering it through `data=journal`
+would test a filesystem neither model describes.
+
+### Failed
+
+**Twenty `CORRUPT_INVARIANT` findings against redb, all of them redb working.**
+`Database::check_integrity` returns `Ok(true)` if the file passed, `Ok(false)` if it failed
+the check *and was repaired*, and `Err` if it could not be repaired. The query tool read
+`Ok(false)` as failure. Repair after an unclean shutdown is what redb documents itself as
+doing — "redb will automatically detect and recover from crashes, power loss, and other
+unclean shutdowns" — so the tool was reporting the feature as the bug. Whether a repair
+silently discarded acknowledged data is a different question, and the value comparison
+already answers it.
+
+**Thirty-six `RECOVERY_FAILED` findings at crash points that had been promised nothing.**
+Early crash points catch redb midway through creating its file, and it refuses to open one
+with "I/O error: invalid data". That is correct: it is not a database yet. The oracle in
+`docs/model.md` is about operations acknowledged durable before the crash point, so when
+there are none, nothing was promised and nothing can have been lost. Without this rule the
+campaign reports a finding against every target that declines to open its own half-written
+file, which is every well-behaved one.
+
+56 findings before these two fixes, 0 after. Both were ours. That is now six model defects
+found by controls and zero real bugs found in a real target, which is the honest ratio and
+worth remembering when reading any future finding.
+
+**The first full-scale sweep filled the disk and died at 72 GB.** Every state kept its
+image: half a gigabyte of sparse file, plus the few megabytes of metadata a fresh filesystem
+writes into it, times a few thousand states. An image is evidence for a finding; without a
+finding it is garbage, and it is now deleted as soon as the oracle has finished with it.
+
+### Learned
+
+The two oracle defects in this phase have the same shape as the four before them: the tool
+reported correct behavior as a violation because it had misread what the target promised.
+Not one of the six was a subtle disagreement about persistence semantics. They were a config
+value the enumerator ignored, a legality rule that deleted its own control, two cases of
+blaming a target for an image that predated its data, an API contract read from its
+signature instead of its documentation, and a sampling bound applied where its justification
+did not hold.
+
+The implication for how much a clean run is worth is uncomfortable and belongs in the
+write-up: the tool's measured false-positive rate against well-behaved targets started at
+100% of findings and only reached zero because two controls kept forcing it down.
+
+### Gate status
+
+See `docs/results.md` for the table and `docs/findings.md` for the triage. The
+10,000-state gate is met by the full sweep; the coverage document states plainly that
+write-path coverage was never measured, which is the largest gap in the result.
+
+Phase 5 does not apply: it is "only for violations that survive Phase 4 triage", and none
+did. Nothing is filed, and filing anything on this evidence would be exactly the
+unrecoverable mistake `CLAUDE.md` warns about.
+
+---
+
 <!--
 Entry template:
 
