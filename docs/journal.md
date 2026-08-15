@@ -265,6 +265,148 @@ Phase 1 exit criteria:
 
 ---
 
+## 2026-08-15 — Model decisions for Phase 2
+
+`CLAUDE.md` requires both readings of each persistence question argued in writing before
+implementation, with the rejected argument recorded. The six questions are from
+`docs/EXECUTION-PLAN.md` §6. Conclusions are transcribed into `docs/model.md`.
+
+A note on citations. Pillai et al. Table 1 is the persistence-property matrix, but its
+column headers are per-filesystem-configuration and do not survive text extraction
+unambiguously. Where a claim below cites Pillai, it cites the paper's prose, which states
+the same properties in words. Anything that would need the table's exact cell is marked as
+unverified rather than asserted.
+
+### 1. Is `rename` ordered after unfsynced writes to the renamed file?
+
+**Reading A: model the ordering.** Pillai: "A special exception to this rule is when a file
+is appended, and then renamed. Since this idiom is commonly used to atomically update
+files, many file systems recognize it and allocate blocks immediately." On a
+delayed-allocation filesystem such as ext4, the append-then-rename idiom is handled
+specially and the data does reach disk before the rename. A model that reorders them
+anyway would enumerate a state ext4 does not produce, and any violation found only in that
+state is a false positive.
+
+**Reading B: do not model it.** The ordering is not in POSIX and the paper's wording is
+"many file systems", not all. xfs and btrfs are not covered by the ext4 delayed-allocation
+special case. Assuming the ordering hides exactly the bug class that the 2009 ext4 data
+loss incident made famous, which Bornholt et al. use as their opening example.
+
+**Conclusion: per filesystem, defaulting to no ordering.** The edge exists in the ext4
+model and not in the xfs or btrfs models. This is possible because each filesystem is a
+separate module and each crash state is materialized on the filesystem it was enumerated
+for, so a state is only ever checked against the filesystem that could produce it.
+
+**Why B alone was rejected:** applying the weakest model everywhere would report, on ext4,
+violations that ext4 cannot produce. `CLAUDE.md` treats a false positive as the
+unrecoverable failure. Reading B survives as the default for filesystems where the
+special case is not documented, which is where it is right.
+
+### 2. Torn-write granularity
+
+**Reading A: 512 bytes.** Pillai: "we observe that all tested file systems seemingly
+provide atomic single-sector overwrites: in some cases (e.g., ext3-ordered), this property
+arises because the underlying disk provides atomic sector writes." Below a sector there is
+no atomicity to model; at exactly a sector there is. A 4 KiB write can therefore tear at
+any of eight sector boundaries.
+
+**Reading B: 4096 bytes.** Page-cache writeback moves whole pages, so tears in practice
+land on page boundaries, and the host kernel here uses a 4 KiB page. Eight times fewer
+states per write.
+
+**Conclusion: 512 bytes, prefix-or-nothing.** A write of *n* sectors yields *n + 1* states
+rather than 2^*n*, because Pillai reports that file systems generally persist a prefix of a
+large append rather than an arbitrary subset of it: "most file systems seemingly guarantee
+that some prefix of the data written (e.g., the first 10 blocks of a larger append) will be
+appended atomically."
+
+**Why B was rejected:** modeling at page granularity would fail to enumerate a state the
+device can produce, which loses bugs silently. The prefix restriction is what keeps the
+state count linear in the write size, so the finer granularity costs little.
+
+**What this model still misses:** a device that tears within a sector, and a filesystem
+that persists a non-prefix subset of a large write. Both are recorded in
+`docs/coverage.md`.
+
+### 3. Does `fsync(fd)` imply the directory entry is durable?
+
+**Reading A: no.** This is the ALICE finding and the standard advice: a new file needs
+`fsync` on the parent directory before its name is durable. Modeling it as required means
+crashfuzz flags a target that omits the directory fsync.
+
+**Reading B: yes, on some filesystems.** Mohan et al.: "file systems often offer guarantees
+above and beyond what is required by POSIX. For example, on ext4, persisting a new file
+will also persist its directory entry." Assuming Reading A on ext4 would produce a state
+ext4 does not produce.
+
+**Conclusion: per filesystem, same structure as decision 1.** The ext4 model treats a
+returned `fsync` on a newly created file as also persisting its directory entry. The xfs
+and btrfs models do not, absent an equivalent documented statement.
+
+**Why a single answer was rejected:** the two readings are both correct, about different
+filesystems. Choosing one globally trades a false positive on ext4 against a missed bug on
+xfs and btrfs. Splitting by filesystem costs one flag per model module.
+
+### 4. Default ext4 mode
+
+**Reading A: `data=ordered`.** The distribution default, so it is what a user of the target
+will actually run on, and it is the configuration a maintainer will assume when reading a
+report.
+
+**Reading B: `data=journal`.** A stronger and simpler model: Pillai reports that data
+journaling modes persist all tested operations in order, so the enumeration under that mode
+is a small subset of the ordered-mode enumeration. Fewer states, less room for the model to
+be wrong.
+
+**Conclusion: `data=ordered` as the default, `data=journal` swept alongside it in Phase 4.**
+
+**Why B was rejected as the default:** a bug that only reproduces under `data=journal` is a
+bug almost nobody can hit, and a clean result under `data=journal` says little about the
+configuration people run. The simpler model is the wrong kind of simple here.
+
+### 5. Is unacknowledged data that reached disk a violation?
+
+**Reading A: yes, when it breaks a stated invariant.** A target may write speculatively,
+but if a crash leaves a state its own recovery declares corrupt, that is a real failure
+regardless of what was acknowledged.
+
+**Reading B: no.** Data the target never acknowledged is unconstrained by definition. Every
+storage engine writes ahead of its acknowledgements; treating that as a violation would
+flag normal behavior everywhere.
+
+**Conclusion: B, with one exception, which is Reading A's actual content.** Unacknowledged
+data is never a violation on its own. It becomes one only when the target's own consistency
+check fails on the recovered image, or when the recovered state is missing an operation the
+target did acknowledge. Both are already covered by `CORRUPT_INVARIANT` and `LOST_ACKED`,
+so `PHANTOM_UNACKED` fires only when the target's own checker fails, never on our judgment
+of what should not be present.
+
+**Why A as stated was rejected:** "breaks a stated invariant" invites us to decide what the
+target's invariants are. That decision belongs to the target's own integrity check, which
+redb exposes as `Database::check_integrity`.
+
+### 6. Does `RECOVERY_FAILED` on a legal image count as a bug?
+
+**Reading A: yes.** An image the model says is legal is one the filesystem could have left
+after a power loss. If the target refuses to open it, every acknowledged durable write in
+that database is unreachable, which is data loss with extra steps.
+
+**Reading B: no.** Refusing to open is failing safe. A target that detects damage and stops
+is behaving better than one that opens and returns wrong answers.
+
+**Conclusion: A, and the target's own maintainer agrees.** redb's
+`tests/crash_consistency.rs` is a regression test for exactly this shape, and its comment
+describes the symptom as "every later open failed with `Corrupted("File truncated below
+stored layout")` -- permanent data loss -- even though the previous durable state was
+intact."
+
+**Why B was not dismissed entirely:** it is right when the image is *not* legal. That makes
+`RECOVERY_FAILED` the violation class most sensitive to the model being correct, so it is
+triaged separately in Phase 4 and a `RECOVERY_FAILED` finding is not filed unless the
+enumeration that produced the image can be justified line by line.
+
+---
+
 <!--
 Entry template:
 
