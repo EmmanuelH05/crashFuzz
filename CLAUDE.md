@@ -103,10 +103,10 @@ for interview answers.
 
 ### Phase 0: Prior art and positioning
 
-- [ ] `docs/prior-art.md` covers all five readings with the "what we do differently" line
-- [ ] The one-sentence positioning statement is written and survives the question "why
+- [x] `docs/prior-art.md` covers all five readings with the "what we do differently" line
+- [x] The one-sentence positioning statement is written and survives the question "why
       hasn't this already been done"
-- [ ] `docs/target-selection.md` names the primary, the control, and at least three
+- [x] `docs/target-selection.md` names the primary, the control, and at least three
       rejected candidates with reasons
 
 ### Phase 1: Trace capture
@@ -122,12 +122,12 @@ Record the target's file I/O faithfully. No crash simulation yet.
 - Trace format is versioned, append-only, and replayable without the target present
 
 Completion conditions:
-- [ ] A hand-written workload's trace matches a manually derived expected sequence, exactly
-- [ ] The target's own test suite passes under interception (proves the shim is
+- [x] A hand-written workload's trace matches a manually derived expected sequence, exactly
+- [x] The target's own test suite passes under interception (proves the shim is
       transparent)
-- [ ] Multithreaded capture preserves a total order without deadlocking
-- [ ] Trace of a 10k-operation workload captured in under 60s with size reported
-- [ ] Payload storage is content-addressed so repeated writes do not blow up trace size
+- [x] Multithreaded capture preserves a total order without deadlocking
+- [x] Trace of a 10k-operation workload captured in under 60s with size reported
+- [x] Payload storage is content-addressed so repeated writes do not blow up trace size
 
 ### Phase 2: Crash state enumeration
 
@@ -143,12 +143,12 @@ Turn one trace into the set of legal post-crash disk images.
 
 Completion conditions:
 - [ ] Enumeration is deterministic and seed-reproducible
-- [ ] A synthetic 3-operation trace produces exactly the hand-computed state count. Show
+- [x] A synthetic 3-operation trace produces exactly the hand-computed state count. Show
       the hand computation in the test file.
 - [ ] State count vs. trace length is measured and plotted. If it is not roughly
       polynomial under the bounds, the bounds are wrong.
-- [ ] A deliberately reordered-unsafe toy workload is correctly flagged (positive control)
-- [ ] A correctly-fsynced toy workload is not flagged (negative control)
+- [x] A deliberately reordered-unsafe toy workload is correctly flagged (positive control)
+- [x] A correctly-fsynced toy workload is not flagged (negative control)
 
 ### Phase 3: Recovery and the oracle
 
@@ -163,7 +163,7 @@ Completion conditions:
 - [ ] Every violation reproduces on a clean machine from the artifact alone
 - [ ] Violations are automatically deduplicated by root-cause signature, not by message
       string
-- [ ] `docs/model.md` has a "known-legal weirdness" section with at least one real entry
+- [x] `docs/model.md` has a "known-legal weirdness" section with at least one real entry
 
 ### Phase 4: The campaign
 
@@ -250,9 +250,149 @@ Execution plan: `docs/EXECUTION-PLAN.md`. Decision rationale: `docs/journal.md`.
   virtiofs mount, which does not provide the semantics under test.
 - **Stack:** `shim/` is C, `core/` and `workloads/` are TypeScript on Bun, `plots/` is
   matplotlib. Use bun/bunx, not npm/npx.
-- **Tests:** `bun test` on the host covers pure logic only. Anything touching a filesystem
-  must run as `bun run vm:sh -- bun test`.
+- **Tests:** run every suite with `bun run test:vm [path]`, which executes `bun test` inside
+  the VM and writes the result where tdd-guard reads it. Plain `bun test` on the host runs
+  pure logic only and leaves tdd-guard blind, which blocks further edits.
 - **Phase status is reported per checkbox.** Name any unchecked box rather than reporting
   the phase complete.
 - **Changes to the persistence model require a written comparison of both readings in
   `docs/journal.md` before implementation.** See `docs/EXECUTION-PLAN.md` §5.
+
+---
+
+# Current state
+
+Last updated 2026-08-15 at commit `294c936`. Phases 0 and 1 are complete; Phase 2 is partly
+done. Anything below marked "not done" is the next work.
+
+## Where things stand
+
+| Phase | Status |
+|---|---|
+| 0 — Prior art, positioning, target selection | Complete |
+| 1 — Trace capture | Complete, all five exit criteria met |
+| 2 — Crash state enumeration | Partial: 3 of 5 exit criteria met |
+| 3–6 | Not started |
+
+Target: **redb** (Rust, Apache-2.0, `github.com/cberner/redb`). Control: **SQLite** (WAL,
+`synchronous=FULL`). Rationale and the six rejected candidates are in
+`docs/target-selection.md`.
+
+Commits, newest first:
+
+```
+294c936 phase2: filesystem models, crash state enumeration, controls
+1571c38 docs: persistence model decisions argued and transcribed
+13e4624 phase1: open flags, wall time, replay, format spec; all exit criteria met
+30a54f1 phase1: thread ids, ordering stamps, markers, *at calls, trace reader
+5fa6000 phase1: trace format v1, shim records writes, persistence and metadata calls
+4e8c10c phase0: prior art, positioning, target=redb control=sqlite
+389ca2b chore: scaffold repo, execution environment, and phase plan
+```
+
+## What exists
+
+| Path | Contents |
+|---|---|
+| `shim/src/shim.c` | The trace shim. 14 normalized call names over about 20 libc symbols. |
+| `shim/src/sha256.c` | SHA-256 for payload content addressing. Checked against external vectors. |
+| `shim/src/probe.c` | Phase 0 only: counts calls to confirm a target routes I/O through libc. |
+| `core/src/trace/reader.ts` | Parses trace v1 into typed events and markers, sorted by submission stamp. |
+| `core/src/trace/replay.ts` | Applies a trace to a directory without the target present. |
+| `core/src/graph/models.ts` | ext4-ordered, ext4-journal, xfs, btrfs. One flag per row of `docs/model.md`. |
+| `core/src/enumerate/states.ts` | Crash state enumeration per crash point. |
+| `core/src/enumerate/bounds.jsonc` | Bound values with the justification for each beside it. |
+| `core/tools/tdd-report.ts` | Runs `bun test` in the VM and writes tdd-guard's `test.json`. |
+| `targets/redb-probe/` | Small Rust workload used for the Phase 0 syscall-path check. |
+
+Docs written: `prior-art.md`, `target-selection.md`, `model.md`, `trace-format.md`,
+`coverage.md`, `journal.md` (four entries). `findings.md` is still a stub, correctly, since
+nothing has been found.
+
+28 tests across 6 files, all passing.
+
+## Trace format v1, in one paragraph
+
+Newline-delimited JSON in `<trace-dir>/trace-<pid>.jsonl`, payloads content-addressed in
+`<trace-dir>/cas/<sha256-hex>`. Each event carries submission stamp `i`, completion stamp
+`j`, normalized call name, fd, tid, resolved path, second path for rename and link, offset,
+length, return value, errno, open flags, wall time, and payload digest. `i` and `j` come
+from one counter in a `MAP_SHARED` page, so forked children continue the same sequence.
+Writes to a file named `crashfuzz.marker` become `marker` records and are excluded from the
+target's data path. Full spec: `docs/trace-format.md`.
+
+## Phase 2: what is left
+
+- [ ] Enumeration is deterministic and seed-reproducible. The enumerator is deterministic by
+      construction (fixed iteration order, no randomness) but no test asserts it, and
+      sampling is not implemented yet, which is where a seed will be needed.
+- [ ] State count vs. trace length measured and plotted. `plots/` is still empty. The script
+      and its output are both committed, per the tooling rules above.
+- [ ] Torn-write states. `bounds.jsonc` specifies prefix-or-nothing at 512 bytes; the
+      enumerator ignores the flag so far.
+- [ ] The sampling bounds (`crashPoints`, `nonFsyncSampleRate`, `maxExhaustiveWorkloadOps`)
+      are written down but not applied to real traces.
+- [ ] Materializing a state as a real image: sparse file, make the filesystem, `losetup`,
+      mount, apply the persisted subset, unmount, detach, snapshot. None of this exists yet
+      and it is the bulk of the remaining Phase 2 work. `core/src/trace/replay.ts` is the
+      application step it should call.
+
+The two Phase 2 controls that pass are unit-level: they check that the enumerator produces,
+or does not produce, the rename-without-data state. They do not yet run against a real
+filesystem image.
+
+## Environment
+
+Lima VM named `crashfuzz`, Ubuntu 24.04 aarch64, kernel 6.8.0. `bun run vm:up` creates it,
+`bun run vm:sh` opens a shell. The repo is mounted at the same path inside the VM
+(`/Users/yungmanny/crashFuzz`), not under the guest home directory.
+
+Installed in the VM by `vm/lima.yaml`: build tools, clang, ext4/xfs/btrfs userspace, strace,
+sqlite3, python3 with matplotlib, bun, and a Rust toolchain. `/etc/profile.d/crashfuzz.sh`
+puts `~/.bun/bin` and `~/.cargo/bin` on PATH.
+
+Scratch state on the guest disk, not in the repo:
+
+```
+/var/lib/crashfuzz/images        crash images (Phase 2, not yet used)
+/var/lib/crashfuzz/cargo-target  CARGO_TARGET_DIR for redb builds
+/var/lib/crashfuzz/suite/redb    redb clone used for the interception gate
+```
+
+## Things that will bite
+
+1. **glibc exposes 64-bit variants as separate symbols:** `pwrite64`, `ftruncate64`,
+   `truncate64`, `open64`, `mmap64`. Rust's `std::fs` and anything built with
+   `_FILE_OFFSET_BITS=64` calls those names. Interposing only the base name produces a trace
+   that looks plausible and is missing every data write. Any newly interposed call needs both
+   spellings and a test that reaches the 64-bit one.
+
+2. **`realpath` writes up to `PATH_MAX` regardless of the destination size.** A shorter
+   buffer is a buffer overflow and `_FORTIFY_SOURCE` will abort the target.
+
+3. **`O_APPEND` ignores the position argument of a positional write.** The replayer opens
+   `r+`, falling back to `w+`. Opening `a+` sends every write to the end of the file.
+
+4. **tdd-guard cannot see `bun test`.** It ships no bun reporter and the tests run inside the
+   VM. `core/tools/tdd-report.ts` bridges both gaps. Use `bun run test:vm`; a run through
+   plain `bun test` leaves the guard with stale or absent results and it blocks the next edit
+   as "premature implementation".
+
+5. **tdd-guard enforces one new test per cycle and minimal implementations.** Adding several
+   tests at once, or writing a complete implementation before a red run, is rejected. Add one
+   test, run `bun run test:vm`, confirm the red is for the right reason, then implement.
+
+6. **The shim's marker handling applies at open as well as write.** A marker file traced as
+   target I/O puts an operation in the graph that the target never performed.
+
+## Decisions a new session should not relitigate
+
+- The false-positive asymmetry decided the persistence model twice: properties differ per
+  filesystem rather than being flattened into one conservative model, and any property no
+  source states is disabled. See `docs/model.md` and the "Model decisions for Phase 2"
+  journal entry.
+- The positioning statement in `docs/EXECUTION-PLAN.md` §1 originally claimed ALICE "does not
+  scale past a few thousand operations". No source supports that number; it was withdrawn and
+  replaced. If it reappears, it is wrong.
+- `docs/EXECUTION-PLAN.md` §5 specifies blake3 for payload digests. The shim uses SHA-256
+  instead, for build simplicity, with the reasoning in the Phase 1 journal entry.
