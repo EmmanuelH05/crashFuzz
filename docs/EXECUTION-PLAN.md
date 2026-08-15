@@ -33,7 +33,7 @@ oracle, not the technique. The full defence is in `docs/prior-art.md`.
 crashfuzz requires `LD_PRELOAD`, ext4/xfs/btrfs, and loopback block devices. macOS
 provides none of these, so all runtime components execute inside a Linux VM.
 
-```
+```text
 macOS host (arm64)                    Lima VM "crashfuzz" (Ubuntu 24.04 aarch64)
 ├─ editor, git, docs      ─virtiofs─▶ /Users/yungmanny/crashFuzz   (source)
 └─ limactl                           ├─ /var/lib/crashfuzz/images  (sparse images, guest disk)
@@ -361,7 +361,7 @@ Violation classes:
 
 Deduplication uses a root-cause signature rather than a message string:
 
-```
+```text
 signature = H(crashPointOpKind, violationClass, firstDivergentLogicalOpKind,
               normalize(violatedEdgeSet))
 ```
@@ -515,7 +515,7 @@ project's control; the README links the thread regardless of outcome.
 
 Phases are managed with GSD:
 
-```
+```text
 gsd-new-project            # once, seeded from CLAUDE.md and this plan
 gsd-plan-phase <n>         # per phase, before implementation
 gsd-execute-phase <n>      # atomic commits

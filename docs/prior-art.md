@@ -15,11 +15,11 @@ purpose it serves here (justifying an out-of-scope boundary).
 
 Sources:
 
-1. https://www.usenix.org/system/files/conference/osdi14/osdi14-paper-pillai.pdf
-2. https://arxiv.org/pdf/1810.02904 — code: https://github.com/utsaslab/crashmonkey
-3. https://jamesbornholt.com/papers/ferrite-asplos16.pdf — code: https://github.com/uwplse/ferrite
-4. https://arxiv.org/abs/2503.01390 — code: https://github.com/efeslab/Pathfinder
-5. https://www.usenix.org/conference/atc20/presentation/rebello
+1. <https://www.usenix.org/system/files/conference/osdi14/osdi14-paper-pillai.pdf>
+2. <https://arxiv.org/pdf/1810.02904> — code: <https://github.com/utsaslab/crashmonkey>
+3. <https://jamesbornholt.com/papers/ferrite-asplos16.pdf> — code: <https://github.com/uwplse/ferrite>
+4. <https://arxiv.org/abs/2503.01390> — code: <https://github.com/efeslab/Pathfinder>
+5. <https://www.usenix.org/conference/atc20/presentation/rebello>
 
 ---
 
@@ -101,8 +101,12 @@ whole bounding argument depends on them:
 > fewer file-system operations on a newly-created file system, and that all reported bugs
 > result from crashes after `fsync()` related system calls."
 
+On the operation count, §3:
+
 > "24 out of the 26 reported bugs require three or fewer core file-system operations to
 > reproduce on an empty file system."
+
+On the crash point, §3:
 
 > "All reported bugs involved a crash right after a persistence point: a call to
 > `fsync()`, `fdatasync()`, or the global `sync` command."

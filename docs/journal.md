@@ -80,7 +80,7 @@ it was ours, not a reviewer's, to catch.
 **2. The probe reported zero writes for redb while strace reported 74.** First run of the
 criterion 6 verification:
 
-```
+```text
 strace: pwrite64 74, fdatasync 14, ftruncate 3, write 1
 probe:  write 1, fdatasync 14, unlink 1        (no pwrite, no ftruncate)
 ```
@@ -141,7 +141,7 @@ Phase 0 exit criteria:
 
 Verification output, run 2026-08-15 in the Lima VM (Ubuntu 24.04, aarch64, kernel 6.8.0):
 
-```
+```text
 redb-probe (8 transactions, alternating Durability::Immediate / None)
   strace -f -c : pwrite64 74  fdatasync 14  ftruncate 3  write 1
   probe.so     : pwrite   74  fdatasync 14  ftruncate 3  write 1  unlink 1

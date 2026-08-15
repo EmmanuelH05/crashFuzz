@@ -122,6 +122,7 @@ Record the target's file I/O faithfully. No crash simulation yet.
 - Trace format is versioned, append-only, and replayable without the target present
 
 Completion conditions:
+
 - [x] A hand-written workload's trace matches a manually derived expected sequence, exactly
 - [x] The target's own test suite passes under interception (proves the shim is
       transparent)
@@ -142,6 +143,7 @@ Turn one trace into the set of legal post-crash disk images.
 - Materialize each state as a real image the target can be pointed at
 
 Completion conditions:
+
 - [ ] Enumeration is deterministic and seed-reproducible
 - [x] A synthetic 3-operation trace produces exactly the hand-computed state count. Show
       the hand computation in the test file.
@@ -158,6 +160,7 @@ Completion conditions:
   the query, the expected result, the actual result
 
 Completion conditions:
+
 - [ ] Control target (SQLite) reports zero violations across the full bounded space. If it
       does not, the oracle is broken. Fix the oracle. Do not report the finding.
 - [ ] Every violation reproduces on a clean machine from the artifact alone
@@ -176,6 +179,7 @@ Run wide. Track everything.
   which were never touched
 
 Completion conditions:
+
 - [ ] At least 10,000 crash states tested on the primary target
 - [ ] Results table by filesystem, mount option, and workload shape
 - [ ] `docs/coverage.md` states what was *not* tested and why, in plain language

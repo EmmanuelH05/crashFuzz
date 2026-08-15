@@ -4,7 +4,7 @@ Produced by `shim/src/shim.c`, read by `core/src/trace/reader.ts`.
 
 A trace directory contains:
 
-```
+```text
 trace-<pid>.jsonl     one segment per process, newline-delimited JSON
 cas/<sha256-hex>      payload objects, one per distinct payload
 ```
