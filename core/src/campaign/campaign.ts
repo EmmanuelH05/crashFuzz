@@ -7,7 +7,7 @@
  * run is reproducible from its seed and the bounds file alone.
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadBounds } from '../enumerate/bounds'
 import { selectCrashPoints } from '../enumerate/crash-points'
@@ -137,6 +137,14 @@ export function runCampaign(options: CampaignOptions): CampaignResult {
       } else {
         existing.occurrences++
       }
+    }
+
+    // An image is evidence for a finding. Without one it is half a gigabyte of
+    // sparse file plus the metadata mkfs wrote into it, and a sweep of a few
+    // thousand states fills the disk and takes the run down with it.
+    const isEvidence = [...findings.values()].some((finding) => finding.imagePath === imagePath)
+    if (!isEvidence) {
+      rmSync(imagePath, { force: true })
     }
   }
 

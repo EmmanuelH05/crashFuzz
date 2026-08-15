@@ -16,7 +16,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { runCampaign } from '../../src/campaign/campaign'
 import { ext4Ordered } from '../../src/graph/models'
@@ -32,6 +32,7 @@ const SCRATCH = '/var/lib/crashfuzz/images'
 const OPERATIONS = 3
 
 let workdir: string
+let retainedImages: string[] = []
 
 beforeAll(() => {
   workdir = mkdtempSync(join(SCRATCH, 'control-'))
@@ -79,5 +80,15 @@ describe('SQLite control', () => {
     // A run that tested nothing is not a clean run.
     expect(result.statesTested).toBeGreaterThan(0)
     expect(result.findings).toEqual([])
+
+    retainedImages = readdirSync(join(workdir, 'images'))
   }, 900_000)
+
+  test('keeps no image for a state that found nothing', () => {
+    // A state costs half a gigabyte of sparse file plus the filesystem metadata
+    // mkfs writes into it. Keeping every image filled the disk partway through
+    // the first Phase 4 sweep and took the campaign down with it. An image is
+    // evidence for a finding; without a finding it is garbage.
+    expect(retainedImages).toEqual([])
+  })
 })

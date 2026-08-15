@@ -60,21 +60,54 @@
   itself wrote, so a target that recovers correctly but corrupts the image on a second open
   would not be caught.
 
+- **Every state at a crash point where nothing had been acknowledged yet.** The oracle
+  returns no violation when no durable acknowledgement precedes the crash point, because
+  nothing was promised there. Those states are still materialized and still opened, so a
+  target that destroys an unrelated file or hangs would be caught, but a target that
+  corrupts its own database before its first acknowledgement would not be reported.
+
+- **redb's repair path, as a judgement.** `check_integrity` returning "failed but was
+  repaired" is treated as recovery working, because redb documents that it recovers from
+  unclean shutdowns automatically. Whether a repair silently discarded acknowledged data is
+  checked by the value comparison instead. A repair that preserved every acknowledged value
+  while corrupting something the workload never wrote would not be noticed.
+
+- **Workload shapes the sweep does not contain.** The redb sweep runs single-writer, large
+  values, many small values, mixed durability and four contending writers. It does not run
+  deletions, range operations, table creation or drop, savepoints, compaction, reopening a
+  database mid-workload, or multi-process access. A bug that needs any of those is out of
+  reach, and the write path they exercise was never traced.
+
+- **The rename-based update protocol on the primary target.** redb does not use one, so the
+  sweep covers that idiom only through `targets/unsafe-kv`, which is a deliberately broken
+  application rather than a real one.
+
 ## Write-path coverage
 
-Phase 4: build the target with coverage instrumentation and report which write-path
-functions were exercised and which were not.
+**Not measured, and this is the largest honest gap in the Phase 4 result.** The sweep
+records which crash states were tested, not which parts of redb's write path produced them.
+Nothing here builds redb with coverage instrumentation, so a claim that the sweep exercised
+redb's write path rests on the shape of the syscall trace rather than on line coverage.
+
+What the traces do show, per shape, is which calls redb issued: `pwrite`, `fsync`,
+`fdatasync` and `ftruncate` on the database file, with no `rename`, no `link`, and no
+directory operations. Any part of redb reached only through calls it never issued in these
+workloads — the compaction path and the savepoint path are the obvious ones — was not
+exercised at all.
 
 ## Sweep completeness
 
+Run by `bun run campaign`; the current numbers are in `docs/results.md`.
+
 | Axis | Value | Run | Notes |
 |---|---|---|---|
-| Filesystem | ext4 `data=ordered` | [ ] | |
-| Filesystem | ext4 `data=journal` | [ ] | |
-| Filesystem | xfs | [ ] | |
-| Filesystem | btrfs | [ ] | |
-| Workload | single-writer | [ ] | |
-| Workload | concurrent writers | [ ] | |
-| Workload | large values | [ ] | |
-| Workload | many small transactions | [ ] | |
-| Workload | rename-based update protocol | [ ] | |
+| Filesystem | ext4 `data=ordered` | [x] | Default mount option, stated explicitly |
+| Filesystem | ext4 `data=journal` | [x] | The one total-order model in the sweep |
+| Filesystem | xfs | [x] | |
+| Filesystem | btrfs | [x] | |
+| Workload | single-writer | [x] | 4 KiB values |
+| Workload | concurrent writers | [x] | Four threads contending for the write transaction |
+| Workload | large values | [x] | 256 KiB, crossing page boundaries |
+| Workload | many small transactions | [x] | 64 byte values |
+| Workload | mixed durability | [x] | Alternates `Immediate` and `None`; the negative control |
+| Workload | rename-based update protocol | [x] | `targets/unsafe-kv` only, not redb, which does not use one |
