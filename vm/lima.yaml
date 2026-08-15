@@ -50,7 +50,9 @@ provision:
         cmake ninja-build
 
       mkdir -p /var/lib/crashfuzz/{images,mnt,traces}
-      chmod 0777 /var/lib/crashfuzz
+      # Recursive: images and mnt are created and removed by the unprivileged
+      # user the test suite runs as, not only by root.
+      chmod -R 0777 /var/lib/crashfuzz
 
       # Phase 4 sweeps all three filesystems. Fail provisioning if any is
       # unavailable rather than skipping it at campaign time.

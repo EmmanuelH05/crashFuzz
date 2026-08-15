@@ -35,8 +35,11 @@ function rebase(path: string, options: ReplayOptions): string {
   return join(options.targetDir, relative(options.rootDir, path))
 }
 
-function applyWrite(event: TraceEvent, options: ReplayOptions): void {
-  const payload = readFileSync(join(options.casDir, event.digest))
+function applyWrite(event: TraceEvent, options: ReplayOptions, bytes?: number): void {
+  const whole = readFileSync(join(options.casDir, event.digest))
+  // A torn write puts a sector-aligned prefix of the payload on disk. The
+  // stored payload can be shorter than that prefix if the call was short.
+  const payload = bytes === undefined ? whole : whole.subarray(0, Math.min(bytes, whole.length))
   const path = rebase(event.path, options)
 
   mkdirSync(dirname(path), { recursive: true })
@@ -57,6 +60,60 @@ function applyWrite(event: TraceEvent, options: ReplayOptions): void {
   }
 }
 
+/** The subset of a trace that a crash state says reached the disk. */
+export type Selection = {
+  /** Operations present in full. */
+  persisted: number[]
+  /** Operations present as a prefix of their payload. */
+  partial: { op: number; bytes: number }[]
+}
+
+/**
+ * Applies only the operations a crash state says persisted, in submission
+ * order. This is how a state becomes an image: same application step as a full
+ * replay, restricted to the subset.
+ */
+export function replaySelection(trace: Trace, options: ReplayOptions, selection: Selection): void {
+  mkdirSync(options.targetDir, { recursive: true })
+
+  const tornBytes = new Map(selection.partial.map((entry) => [entry.op, entry.bytes]))
+  const whole = new Set(selection.persisted)
+
+  for (let index = 0; index < trace.events.length; index++) {
+    if (!whole.has(index) && !tornBytes.has(index)) continue
+    applySelected(trace.events[index]!, options, tornBytes.get(index))
+  }
+}
+
+/** One operation of a crash state, torn to `bytes` when the state says so. */
+function applySelected(event: TraceEvent, options: ReplayOptions, bytes?: number): void {
+  switch (event.call) {
+    case 'write':
+    case 'pwrite':
+    case 'writev':
+      applyWrite(event, options, bytes)
+      break
+    case 'truncate':
+    case 'ftruncate':
+      truncateSync(rebase(event.path, options), event.length)
+      break
+    case 'mkdir':
+      mkdirSync(rebase(event.path, options), { recursive: true })
+      break
+    case 'rename':
+      renameSync(rebase(event.path, options), rebase(event.path2, options))
+      break
+    case 'link':
+      linkSync(rebase(event.path, options), rebase(event.path2, options))
+      break
+    case 'unlink':
+      rmSync(rebase(event.path, options), { force: true })
+      break
+    default:
+      break
+  }
+}
+
 /**
  * Applies events in submission order. Calls that only affect durability
  * (fsync, fdatasync, sync_file_range) do not change file contents and are
@@ -67,31 +124,6 @@ export function replayTrace(trace: Trace, options: ReplayOptions): void {
 
   for (const event of trace.events) {
     if (event.returnValue < 0) continue
-
-    switch (event.call) {
-      case 'write':
-      case 'pwrite':
-      case 'writev':
-        applyWrite(event, options)
-        break
-      case 'truncate':
-      case 'ftruncate':
-        truncateSync(rebase(event.path, options), event.length)
-        break
-      case 'mkdir':
-        mkdirSync(rebase(event.path, options), { recursive: true })
-        break
-      case 'rename':
-        renameSync(rebase(event.path, options), rebase(event.path2, options))
-        break
-      case 'link':
-        linkSync(rebase(event.path, options), rebase(event.path2, options))
-        break
-      case 'unlink':
-        rmSync(rebase(event.path, options), { force: true })
-        break
-      default:
-        break
-    }
+    applySelected(event, options)
   }
 }

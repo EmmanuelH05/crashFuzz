@@ -7,11 +7,12 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { Trace, TraceEvent } from '../../src/trace/reader'
 import { parseTrace } from '../../src/trace/reader'
-import { replayTrace } from '../../src/trace/replay'
+import { replaySelection, replayTrace } from '../../src/trace/replay'
 
 const REPO_ROOT = join(import.meta.dir, '..', '..', '..')
 const SHIM_SO = join(REPO_ROOT, 'shim', 'build', 'shim.so')
@@ -73,5 +74,56 @@ describe('replayTrace', () => {
 
     expect(readFileSync(join(replayDir, 'f'))).toEqual(readFileSync(join(liveDir, 'f')))
     expect(readFileSync(join(replayDir, 'f')).toString()).toBe('HEADer--body')
+  })
+})
+
+describe('replaySelection', () => {
+  test('applies only the persisted operations, torn ones cut to their prefix', () => {
+    // Two writes to two files. The state has the first in full and the second
+    // as a 512-byte prefix of a 1024-byte payload, which is the torn-write
+    // shape docs/model.md permits. Nothing else may appear on disk.
+    const casDir = mkdtempSync(join(workdir, 'cas-'))
+    const rootDir = mkdtempSync(join(workdir, 'root-'))
+    const targetDir = mkdtempSync(join(workdir, 'sel-'))
+
+    const payloadA = Buffer.alloc(1024, 0xaa)
+    const payloadB = Buffer.alloc(1024, 0xbb)
+    writeFileSync(join(casDir, 'digest-a'), payloadA)
+    writeFileSync(join(casDir, 'digest-b'), payloadB)
+
+    const event = (index: number, path: string, digest: string): TraceEvent => ({
+      index,
+      completionIndex: index + 1000,
+      call: 'write',
+      fd: 3,
+      threadId: 1,
+      path: join(rootDir, path),
+      path2: '',
+      offset: 0,
+      length: 1024,
+      returnValue: 1024,
+      errno: 0,
+      digest,
+    })
+
+    const trace: Trace = {
+      header: { version: 1, pid: 1 },
+      events: [
+        event(0, 'a', 'digest-a'),
+        event(1, 'b', 'digest-b'),
+        event(2, 'c', 'digest-a'),
+      ],
+      markers: [],
+    }
+
+    replaySelection(
+      trace,
+      { casDir, rootDir, targetDir },
+      { persisted: [0], partial: [{ op: 1, bytes: 512 }] },
+    )
+
+    expect(readdirSync(targetDir).sort()).toEqual(['a', 'b'])
+    expect(readFileSync(join(targetDir, 'a'))).toEqual(payloadA)
+    expect(readFileSync(join(targetDir, 'b'))).toEqual(payloadB.subarray(0, 512))
   })
 })
