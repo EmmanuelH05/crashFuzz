@@ -95,6 +95,51 @@ function strictSectorPrefixes(event: TraceEvent): number[] {
 }
 
 /**
+ * Operations that need their target file to already exist on disk.
+ *
+ * Only the size-changing ones. A rename, link or unlink of a file whose data
+ * writes did not persist is legal, and is the shape of the 2009 ext4 data loss
+ * bug: `open(O_CREAT)` creates the inode, so the name can reach the disk while
+ * the bytes behind it do not. Requiring data for those would delete the
+ * positive control from the space, which is how this rule was caught.
+ */
+const NEEDS_EXISTING_FILE: ReadonlySet<string> = new Set(['truncate', 'ftruncate'])
+
+/**
+ * Whether every operation in a state could have reached the disk given the
+ * others. A metadata operation cannot persist before the file it refers to
+ * exists, so a state that truncates a file whose creating write it dropped is
+ * not one any filesystem can produce.
+ *
+ * A path with no earlier mutation in the trace predates the trace, so nothing
+ * is required of it.
+ */
+function existsOnDisk(events: TraceEvent[], persisted: number[]): boolean {
+  const present = new Set(persisted)
+
+  for (const index of persisted) {
+    const event = events[index]!
+    if (!NEEDS_EXISTING_FILE.has(event.call)) continue
+
+    let earlier = false
+    let earlierPersisted = false
+
+    for (let j = 0; j < index; j++) {
+      const candidate = events[j]!
+      if (candidate.path !== event.path) continue
+      if (!MUTATING.has(candidate.call) || candidate.returnValue < 0) continue
+
+      earlier = true
+      if (present.has(j)) earlierPersisted = true
+    }
+
+    if (earlier && !earlierPersisted) return false
+  }
+
+  return true
+}
+
+/**
  * Enumerates the legal crash states of a trace, one group per crash point.
  * Deterministic: states come out in a fixed order for a given trace, model and
  * bounds, so a run is reproducible without a seed.
@@ -117,7 +162,14 @@ export function enumerateCrashStates(trace: Trace, options: EnumerateOptions): C
     }
 
     const window = free.slice(-options.bounds.maxUnpersistedWindow)
-    const alwaysPresent = [...pinned].sort((a, b) => a - b)
+
+    // Operations older than the window are treated as persisted, per
+    // bounds.jsonc, which is what a durability floor would eventually force
+    // anyway. Dropping them instead would leave an operation the target
+    // performed out of every state, and any acknowledgement depending on it
+    // would look lost in every image.
+    const older = free.slice(0, Math.max(0, free.length - options.bounds.maxUnpersistedWindow))
+    const alwaysPresent = [...new Set([...pinned, ...older])].sort((a, b) => a - b)
 
     if (options.model.totalOrder) {
       // Every operation persists in program order, so a legal state is a
@@ -138,6 +190,7 @@ export function enumerateCrashStates(trace: Trace, options: EnumerateOptions): C
         if (mask & (1 << bit)) persisted.push(window[bit]!)
       }
       persisted.sort((a, b) => a - b)
+      if (!existsOnDisk(events, persisted)) continue
       states.push({ crashPoint, persisted, partial: [] })
 
       if (!options.bounds.tornWrites) continue

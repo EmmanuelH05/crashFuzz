@@ -30,6 +30,20 @@ export type ReplayOptions = {
   targetDir: string
 }
 
+/**
+ * Creates the file if the state did not put any data in it, and returns the
+ * path. A crash state can legally contain an operation on a file whose data
+ * writes it dropped: `open(O_CREAT)` created the inode, and the inode existing
+ * is independent of the bytes behind it. SQLite's `-shm` file is truncated to
+ * size before anything is written to it, so this is the common case rather than
+ * the exotic one.
+ */
+function ensureFile(path: string): string {
+  mkdirSync(dirname(path), { recursive: true })
+  closeSync(openSync(path, 'a'))
+  return path
+}
+
 /** Maps a path recorded during capture into the replay directory. */
 function rebase(path: string, options: ReplayOptions): string {
   return join(options.targetDir, relative(options.rootDir, path))
@@ -95,7 +109,7 @@ function applySelected(event: TraceEvent, options: ReplayOptions, bytes?: number
       break
     case 'truncate':
     case 'ftruncate':
-      truncateSync(rebase(event.path, options), event.length)
+      truncateSync(ensureFile(rebase(event.path, options)), event.length)
       break
     case 'mkdir':
       mkdirSync(rebase(event.path, options), { recursive: true })

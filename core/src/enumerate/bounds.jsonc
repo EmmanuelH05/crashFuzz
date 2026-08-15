@@ -27,6 +27,12 @@
   "tornWrites": true,
   "tornWriteGranularityBytes": 512,
 
+  // States materialized per crash point. Enumerating a state costs
+  // microseconds; materializing one costs a filesystem creation, a loop device,
+  // two mounts and a target recovery. A crash point that enumerates thousands
+  // of states cannot have all of them run, so the campaign samples with a seed.
+  "maxStatesPerCrashPoint": 24,
+
   // At most one operation is torn in any one state. Tearing every operation in
   // the window independently multiplies the space by (sectors + 1) per
   // operation; a bug needing two simultaneously torn writes needs one first.

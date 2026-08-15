@@ -15,6 +15,7 @@ export type LoadedBounds = {
   nonFsyncSampleRate: number
   maxUnpersistedWindow: number
   maxExhaustiveWorkloadOps: number
+  maxStatesPerCrashPoint: number
   tornWrites: boolean
   tornWriteGranularityBytes: number
   maxTornOpsPerState: number

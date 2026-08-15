@@ -127,4 +127,19 @@ describe('sqlite-workload', () => {
     if (recovery.status !== 'failed') return
     expect(recovery.detail).not.toBe('')
   })
+
+  test('treats an image from before the database existed as empty, not as a failure', () => {
+    // Crash points early in a trace produce images that predate the database
+    // file. The target cannot be blamed for refusing to open a file the crash
+    // point precedes, and nothing is acknowledged that early, so reporting
+    // RECOVERY_FAILED there would be a false positive manufactured by the
+    // harness. It is an empty database: the oracle still flags anything that
+    // was acknowledged and is now missing.
+    const recovery = recoverSqlite(join(workdir, 'never-created.db'))
+
+    expect(recovery.status).toBe('opened')
+    if (recovery.status !== 'opened') return
+    expect(recovery.integrityOk).toBe(true)
+    expect(recovery.values.size).toBe(0)
+  })
 })

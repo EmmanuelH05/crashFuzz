@@ -90,4 +90,59 @@ describe('enumerateCrashStates', () => {
     const atOpOne = states.filter((s) => s.crashPoint === 1).map((s) => s.persisted)
     expect(atOpOne).toEqual([[], [0], [0, 1]])
   })
+
+  test('operations older than the unpersisted window are present in every state', () => {
+    // bounds.jsonc: "Operations older than the window are treated as persisted,
+    // which is what a durability floor would eventually force anyway." Dropping
+    // them instead would put an operation the target performed into no state at
+    // all, and any acknowledgement that depended on it would look lost in every
+    // image. That is a false positive manufactured by the enumerator.
+    const long: Trace = {
+      header: { version: 1, pid: 1 },
+      events: Array.from({ length: 6 }, (_, i) =>
+        event(i, { call: 'write', path: `/db/f${i}` }),
+      ),
+      markers: [],
+    }
+
+    const states = enumerateCrashStates(long, {
+      model: ext4Ordered,
+      bounds: { tornWrites: false, maxUnpersistedWindow: 2 },
+    })
+
+    // At the last crash point six operations are issued and only the newest two
+    // are free, so the first four are in every state.
+    const atEnd = states.filter((s) => s.crashPoint === 5)
+    expect(atEnd.length).toBeGreaterThan(0)
+    for (const state of atEnd) {
+      expect(state.persisted).toEqual(expect.arrayContaining([0, 1, 2, 3]))
+    }
+  })
+
+  test('does not enumerate a state that operates on a file it never created', () => {
+    // A truncate of a file whose only creating write did not persist is not a
+    // state any filesystem can produce: the metadata operation cannot reach the
+    // disk before the inode it refers to. Enumerating it would either crash
+    // materialization or, worse, silently materialize a different state than
+    // the one the finding names.
+    const created: Trace = {
+      header: { version: 1, pid: 1 },
+      events: [
+        event(0, { call: 'write', path: '/db/scratch' }),
+        event(1, { call: 'ftruncate', path: '/db/scratch', length: 128, returnValue: 0 }),
+      ],
+      markers: [],
+    }
+
+    const states = enumerateCrashStates(created, {
+      model: ext4Ordered,
+      bounds: { tornWrites: false, maxUnpersistedWindow: 8 },
+    })
+
+    const truncateWithoutFile = states.filter(
+      (state) => state.persisted.includes(1) && !state.persisted.includes(0),
+    )
+
+    expect(truncateWithoutFile).toEqual([])
+  })
 })

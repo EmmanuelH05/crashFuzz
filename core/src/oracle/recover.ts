@@ -7,6 +7,7 @@
  * judgements belong to the target, not to this project.
  */
 
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RecoveryResult } from './oracle'
 
@@ -27,6 +28,20 @@ const QUERY_TOOL = join(
  * thousands of images and some of them are expected not to open.
  */
 export function recoverSqlite(dbPath: string): RecoveryResult {
+  // An image from before the database file was created is not a recovery
+  // failure. The target cannot be blamed for refusing to open a file that the
+  // crash point predates, and nothing is acknowledged that early for it to have
+  // lost. It is reported as an empty database, which leaves the oracle free to
+  // flag anything that was acknowledged and is now missing.
+  if (!existsSync(dbPath)) {
+    return {
+      status: 'opened',
+      integrityOk: true,
+      values: new Map(),
+      detail: 'database file absent at this crash point',
+    }
+  }
+
   const proc = Bun.spawnSync([QUERY_TOOL, dbPath])
   const stdout = proc.stdout.toString()
   const stderr = proc.stderr.toString().trim()
