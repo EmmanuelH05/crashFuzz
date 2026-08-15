@@ -262,8 +262,23 @@ Execution plan: `docs/EXECUTION-PLAN.md`. Decision rationale: `docs/journal.md`.
 
 ## Current state
 
-Last updated 2026-08-15 at commit `294c936`. Phases 0 and 1 are complete; Phase 2 is partly
-done. Anything below marked "not done" is the next work.
+Last code commit: `294c936`, 2026-08-15; anything after it is documentation. Phases 0 and 1
+are complete, Phase 2 is partly done, and anything below marked "not done" is the next work.
+Update this line when code lands, or it will describe a tree that no longer exists.
+
+This section is a summary and goes stale. Everything above it is the spec and outranks it.
+Where it disagrees with another document, the other document wins:
+
+| Question | Source of truth |
+|---|---|
+| What is legal after a crash, and why | `docs/model.md` |
+| Why a model decision went the way it did | `docs/journal.md` |
+| What the trace format contains | `docs/trace-format.md` |
+| What is not tested | `docs/coverage.md` |
+| What was actually run and what it produced | the journal entry for that phase |
+| Which phase boxes are met | the checkboxes above, not this summary |
+
+If a claim here cannot be traced to one of those, treat it as unverified.
 
 ### Where things stand
 
