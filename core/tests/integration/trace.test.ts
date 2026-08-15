@@ -6,7 +6,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -294,5 +294,330 @@ describe('shim.so', () => {
     expect(events.map((r) => r.call)).toEqual(['open', 'pwrite', 'ftruncate', 'close'])
     expect(events.find((r) => r.call === 'pwrite')).toMatchObject({ off: 8, len: 4, path: target })
     expect(events.find((r) => r.call === 'ftruncate')).toMatchObject({ len: 6, path: target })
+  })
+
+  test('records a thread id and both submission and completion order', async () => {
+    const bin = buildWorkload(
+      'threaded_writes',
+      `
+      #include <fcntl.h>
+      #include <pthread.h>
+      #include <stdio.h>
+      #include <unistd.h>
+
+      static char dir[512];
+
+      static void *worker(void *arg) {
+        long id = (long)arg;
+        char path[512];
+        snprintf(path, sizeof path, "%s/t%ld", dir, id);
+        int fd = open(path, O_CREAT | O_RDWR | O_TRUNC, 0644);
+        if (fd < 0) return NULL;
+        for (int i = 0; i < 20; i++) {
+          write(fd, "abcd", 4);
+          fsync(fd);
+        }
+        close(fd);
+        return NULL;
+      }
+
+      int main(int argc, char **argv) {
+        snprintf(dir, sizeof dir, "%s", argv[1]);
+        pthread_t threads[4];
+        for (long i = 0; i < 4; i++) {
+          if (pthread_create(&threads[i], NULL, worker, (void *)i) != 0) return 1;
+        }
+        for (int i = 0; i < 4; i++) pthread_join(threads[i], NULL);
+        return 0;
+      }
+      `,
+    )
+
+    const records = await readTrace(trace(bin, [workdir]))
+    const events = records.filter((r) => r.rec === 'event')
+
+    // Submission and completion stamps come from one counter, so together they
+    // cover 0..2N-1 exactly once and give a total order over both points.
+    const stamps = events.flatMap((r) => [r.i as number, r.j as number])
+    expect([...stamps].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: stamps.length }, (_, n) => n),
+    )
+
+    const threadIds = new Set(events.map((r) => r.tid))
+    expect(threadIds.size).toBe(4)
+
+    // A call completes after it was submitted, so its completion index is
+    // always the larger of the two.
+    expect(events.every((r) => (r.j as number) > (r.i as number))).toBe(true)
+  })
+
+  test('digests a vectored write over the concatenated buffers', async () => {
+    const bin = buildWorkload(
+      'vectored_write',
+      `
+      #include <fcntl.h>
+      #include <sys/uio.h>
+      #include <unistd.h>
+      int main(int argc, char **argv) {
+        int fd = open(argv[1], O_CREAT | O_RDWR | O_TRUNC, 0644);
+        if (fd < 0) return 1;
+        struct iovec iov[2] = {
+          { .iov_base = (void *)"sa", .iov_len = 2 },
+          { .iov_base = (void *)"me", .iov_len = 2 },
+        };
+        if (writev(fd, iov, 2) != 4) return 2;
+        return close(fd);
+      }
+      `,
+    )
+    const traceDir = trace(bin, [join(workdir, 'vectored.bin')])
+    const records = await readTrace(traceDir)
+    const writev = records.find((r) => r.call === 'writev')!
+
+    expect(writev).toMatchObject({
+      off: 0,
+      len: 4,
+      ret: 4,
+      dig: '0967115f2813a3541eaef77de9d9d5773f1c0c04314b0bbfe4ff3b3b1c55b5d5',
+    })
+    expect(await Bun.file(join(traceDir, 'cas', writev.dig as string)).text()).toBe('same')
+  })
+
+  test('records marker writes inline and keeps them out of the target data path', async () => {
+    // The workload driver writes to a file named crashfuzz.marker to mark where
+    // a logical operation begins and ends. The shim records the marker in the
+    // trace and does not treat it as target I/O.
+    const bin = buildWorkload(
+      'marker_channel',
+      `
+      #include <fcntl.h>
+      #include <stdio.h>
+      #include <string.h>
+      #include <unistd.h>
+      int main(int argc, char **argv) {
+        char marker_path[512], data_path[512];
+        snprintf(marker_path, sizeof marker_path, "%s/crashfuzz.marker", argv[1]);
+        snprintf(data_path, sizeof data_path, "%s/data.bin", argv[1]);
+
+        int mfd = open(marker_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+        if (mfd < 0) return 1;
+        int fd = open(data_path, O_CREAT | O_RDWR | O_TRUNC, 0644);
+        if (fd < 0) return 2;
+
+        const char *begin = "op=1 phase=begin";
+        if (write(mfd, begin, strlen(begin)) < 0) return 3;
+        if (write(fd, "abcd", 4) != 4) return 4;
+        const char *end = "op=1 phase=end";
+        if (write(mfd, end, strlen(end)) < 0) return 5;
+
+        close(fd);
+        return close(mfd);
+      }
+      `,
+    )
+
+    const records = await readTrace(trace(bin, [workdir]))
+
+    expect(records.filter((r) => r.rec === 'marker').map((r) => r.text)).toEqual([
+      'op=1 phase=begin',
+      'op=1 phase=end',
+    ])
+
+    const writes = records.filter((r) => r.rec === 'event' && r.call === 'write')
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toMatchObject({ path: join(workdir, 'data.bin'), len: 4 })
+  })
+
+  test('trace of the rename-based update protocol matches the derived sequence', async () => {
+    // Expected sequence, derived by hand from the workload source:
+    //
+    //   1  open   dir/f.tmp   O_CREAT|O_RDWR|O_TRUNC
+    //   2  write  dir/f.tmp   off 0   len 8
+    //   3  fsync  dir/f.tmp
+    //   4  close  dir/f.tmp
+    //   5  rename dir/f.tmp -> dir/f
+    //   6  open   dir         O_RDONLY
+    //   7  fsync  dir
+    //   8  close  dir
+    //
+    // The directory fsync is what makes the rename durable; ALICE reports
+    // omitting it as a crash vulnerability.
+    const bin = buildWorkload(
+      'rename_protocol',
+      `
+      #include <fcntl.h>
+      #include <stdio.h>
+      #include <unistd.h>
+      int main(int argc, char **argv) {
+        char tmp[512], final[512];
+        snprintf(tmp, sizeof tmp, "%s/f.tmp", argv[1]);
+        snprintf(final, sizeof final, "%s/f", argv[1]);
+
+        int fd = open(tmp, O_CREAT | O_RDWR | O_TRUNC, 0644);
+        if (fd < 0) return 1;
+        if (write(fd, "payload8", 8) != 8) return 2;
+        if (fsync(fd) != 0) return 3;
+        if (close(fd) != 0) return 4;
+        if (rename(tmp, final) != 0) return 5;
+
+        int dirfd = open(argv[1], O_RDONLY);
+        if (dirfd < 0) return 6;
+        if (fsync(dirfd) != 0) return 7;
+        return close(dirfd);
+      }
+      `,
+    )
+    const dir = mkdtempSync(join(workdir, 'protocol-'))
+
+    const records = await readTrace(trace(bin, [dir]))
+    const events = records.filter((r) => r.rec === 'event')
+
+    expect(events.map((r) => [r.call, r.path, r.path2, r.off, r.len])).toEqual([
+      ['open', join(dir, 'f.tmp'), '', 0, 0],
+      ['write', join(dir, 'f.tmp'), '', 0, 8],
+      ['fsync', join(dir, 'f.tmp'), '', 0, 0],
+      ['close', join(dir, 'f.tmp'), '', 0, 0],
+      ['rename', join(dir, 'f.tmp'), join(dir, 'f'), 0, 0],
+      ['open', dir, '', 0, 0],
+      ['fsync', dir, '', 0, 0],
+      ['close', dir, '', 0, 0],
+    ])
+  })
+
+  test('traces a 10,000-operation workload in under 60 seconds', async () => {
+    const bin = buildWorkload(
+      'ten_thousand_ops',
+      `
+      #include <fcntl.h>
+      #include <stdio.h>
+      #include <unistd.h>
+      int main(int argc, char **argv) {
+        int fd = open(argv[1], O_CREAT | O_RDWR | O_TRUNC, 0644);
+        if (fd < 0) return 1;
+        char page[4096];
+        for (int i = 0; i < 10000; i++) {
+          snprintf(page, sizeof page, "record-%d", i);
+          if (write(fd, page, sizeof page) != sizeof page) return 2;
+          if (i % 100 == 0 && fsync(fd) != 0) return 3;
+        }
+        return close(fd);
+      }
+      `,
+    )
+
+    const started = performance.now()
+    const traceDir = trace(bin, [join(workdir, 'bulk.bin')])
+    const elapsedSeconds = (performance.now() - started) / 1000
+
+    const records = await readTrace(traceDir)
+    const events = records.filter((r) => r.rec === 'event')
+    const traceBytes = readdirSync(traceDir)
+      .filter((f) => f.endsWith('.jsonl'))
+      .reduce((total, f) => total + statSync(join(traceDir, f)).size, 0)
+    const casBytes = readdirSync(join(traceDir, 'cas')).reduce(
+      (total, f) => total + statSync(join(traceDir, 'cas', f)).size,
+      0,
+    )
+
+    console.log(
+      `10k ops: ${elapsedSeconds.toFixed(1)}s, ${events.length} events, ` +
+        `trace ${(traceBytes / 1e6).toFixed(1)} MB, payloads ${(casBytes / 1e6).toFixed(1)} MB`,
+    )
+
+    expect(events.filter((r) => r.call === 'write')).toHaveLength(10000)
+    expect(elapsedSeconds).toBeLessThan(60)
+  }, 120_000)
+
+  test('keeps one ordering across a forked child', async () => {
+    const bin = buildWorkload(
+      'forking_writer',
+      `
+      #include <fcntl.h>
+      #include <stdio.h>
+      #include <sys/wait.h>
+      #include <unistd.h>
+      int main(int argc, char **argv) {
+        char parent_path[512], child_path[512];
+        snprintf(parent_path, sizeof parent_path, "%s/parent.bin", argv[1]);
+        snprintf(child_path, sizeof child_path, "%s/child.bin", argv[1]);
+
+        pid_t pid = fork();
+        if (pid < 0) return 1;
+
+        const char *path = pid == 0 ? child_path : parent_path;
+        int fd = open(path, O_CREAT | O_RDWR | O_TRUNC, 0644);
+        if (fd < 0) return 2;
+        if (write(fd, "abcd", 4) != 4) return 3;
+        if (fsync(fd) != 0) return 4;
+        if (close(fd) != 0) return 5;
+
+        if (pid == 0) return 0;
+        int status = 0;
+        waitpid(pid, &status, 0);
+        return status;
+      }
+      `,
+    )
+    const dir = mkdtempSync(join(workdir, 'fork-'))
+
+    const records = await readTrace(trace(bin, [dir]))
+    const events = records.filter((r) => r.rec === 'event')
+
+    const parentWrites = events.filter((r) => r.path === join(dir, 'parent.bin'))
+    const childWrites = events.filter((r) => r.path === join(dir, 'child.bin'))
+    expect(parentWrites.length).toBeGreaterThan(0)
+    expect(childWrites.length).toBeGreaterThan(0)
+
+    // Both processes stamp from the same shared counter, so no two records in
+    // the merged trace share an index.
+    const stamps = events.flatMap((r) => [r.i as number, r.j as number])
+    expect(new Set(stamps).size).toBe(stamps.length)
+  })
+
+  test('records the *at calls against the directory descriptor they resolve from', async () => {
+    // Storage engines use openat, renameat2 and unlinkat to update files
+    // relative to a directory they hold open.
+    const bin = buildWorkload(
+      'relative_calls',
+      `
+      #define _GNU_SOURCE
+      #include <fcntl.h>
+      #include <stdio.h>
+      #include <unistd.h>
+      int main(int argc, char **argv) {
+        int dirfd = open(argv[1], O_RDONLY | O_DIRECTORY);
+        if (dirfd < 0) return 1;
+
+        int fd = openat(dirfd, "a", O_CREAT | O_RDWR | O_TRUNC, 0644);
+        if (fd < 0) return 2;
+        if (write(fd, "abcd", 4) != 4) return 3;
+        if (close(fd) != 0) return 4;
+
+        if (renameat(dirfd, "a", dirfd, "b") != 0) return 5;
+        if (unlinkat(dirfd, "b", 0) != 0) return 6;
+        return close(dirfd);
+      }
+      `,
+    )
+    const dir = mkdtempSync(join(workdir, 'relative-'))
+
+    const records = await readTrace(trace(bin, [dir]))
+    const events = records.filter((r) => r.rec === 'event')
+
+    expect(events.map((r) => r.call)).toEqual([
+      'open',
+      'open',
+      'write',
+      'close',
+      'rename',
+      'unlink',
+      'close',
+    ])
+    expect(events.find((r) => r.call === 'write')!.path).toBe(join(dir, 'a'))
+    expect(events.find((r) => r.call === 'rename')).toMatchObject({
+      path: join(dir, 'a'),
+      path2: join(dir, 'b'),
+    })
+    expect(events.find((r) => r.call === 'unlink')!.path).toBe(join(dir, 'b'))
   })
 })

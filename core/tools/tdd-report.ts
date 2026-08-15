@@ -51,25 +51,21 @@ type TestRunOutput = {
 function runTests(args: string[]): { output: string; junit: string } {
   const bunArgs = ['test', ...args, '--reporter=junit', `--reporter-outfile=${JUNIT_PATH}`]
 
-  if (process.platform === 'linux') {
-    const proc = Bun.spawnSync(['bun', ...bunArgs], { cwd: REPO_ROOT })
-    return {
-      output: proc.stdout.toString() + proc.stderr.toString(),
-      junit: readIfPresent(JUNIT_PATH),
-    }
-  }
+  // bun writes no JUnit file when a test module fails to load, so the previous
+  // run's file is removed first and its absence is treated as a failure rather
+  // than reported as the current result.
+  const remote = `rm -f ${JUNIT_PATH}; cd ${REPO_ROOT} && bun ${bunArgs.join(' ')}`
 
-  const remote = `cd ${REPO_ROOT} && bun ${bunArgs.join(' ')}`
-  const proc = Bun.spawnSync(['limactl', 'shell', VM_NAME, '--', 'bash', '-lc', remote])
-  const junit = Bun.spawnSync([
-    'limactl',
-    'shell',
-    VM_NAME,
-    '--',
-    'bash',
-    '-lc',
-    `cat ${JUNIT_PATH} 2>/dev/null || true`,
-  ])
+  const proc =
+    process.platform === 'linux'
+      ? Bun.spawnSync(['bash', '-lc', remote])
+      : Bun.spawnSync(['limactl', 'shell', VM_NAME, '--', 'bash', '-lc', remote])
+
+  const read = `cat ${JUNIT_PATH} 2>/dev/null || true`
+  const junit =
+    process.platform === 'linux'
+      ? Bun.spawnSync(['bash', '-lc', read])
+      : Bun.spawnSync(['limactl', 'shell', VM_NAME, '--', 'bash', '-lc', read])
 
   return {
     output: proc.stdout.toString() + proc.stderr.toString(),
@@ -77,11 +73,24 @@ function runTests(args: string[]): { output: string; junit: string } {
   }
 }
 
-function readIfPresent(path: string): string {
-  try {
-    return Bun.spawnSync(['cat', path]).stdout.toString()
-  } catch {
-    return ''
+/** Result used when the run produced no JUnit file, which means it did not start. */
+function loadFailure(output: string): TestRunOutput {
+  return {
+    testModules: [
+      {
+        moduleId: 'test run',
+        tests: [
+          {
+            name: 'test run did not produce results',
+            fullName: 'test run did not produce results',
+            state: 'failed',
+            errors: [{ message: output.trim() || 'no output' }],
+          },
+        ],
+      },
+    ],
+    unhandledErrors: [],
+    reason: 'failed',
   }
 }
 
@@ -153,12 +162,7 @@ function main(argv: string[]): number {
 
   console.log(output)
 
-  if (junit.trim() === '') {
-    console.error('tdd-report: no JUnit output produced; test.json not written')
-    return 1
-  }
-
-  const result = parseJunit(junit, output)
+  const result = junit.trim() === '' ? loadFailure(output) : parseJunit(junit, output)
   mkdirSync(dirname(OUT_PATH), { recursive: true })
   writeFileSync(OUT_PATH, JSON.stringify(result, null, 2))
 
