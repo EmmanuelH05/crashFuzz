@@ -43,6 +43,16 @@ the filesystem it was enumerated for.
 - **`fdatasync` does not persist metadata.** A size change that was not otherwise persisted
   may be absent in a state after `fdatasync` but present after `fsync`.
 
+  **The enumerator does not implement this.** `core/src/enumerate/states.ts` pins every
+  earlier mutation of a file on `fdatasync`, including size-changing ones, exactly as it does
+  for `fsync`. The implementation is therefore stricter than this document: it enumerates
+  fewer states than the model permits, and the states it omits are ones where a size change
+  is absent after an `fdatasync`. That loses bugs rather than inventing them, which is the
+  direction `CLAUDE.md` requires, but it is a divergence and it is load-bearing — redb
+  commits with `fdatasync`, so closing it would enlarge the redb state space considerably.
+  Recorded rather than fixed, because changing it is a persistence model change and
+  `CLAUDE.md` requires both readings argued in `docs/journal.md` first.
+
 ## The oracle
 
 Correct recovery, operationally:

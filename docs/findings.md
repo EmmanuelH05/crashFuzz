@@ -6,11 +6,56 @@ and is reported as one.
 
 ## Bugs
 
-**None.** No violation against redb or SQLite has survived triage. Nothing has been filed
-with any maintainer, and nothing should be.
+**None confirmed, one undecided.** Nothing has been filed with any maintainer, and on the
+current evidence nothing should be.
 
-The one bug this tool has found is in `targets/unsafe-kv`, an application written for this
-repository specifically to contain it. That is the positive control, not a finding.
+The one confirmed bug this tool has found is in `targets/unsafe-kv`, an application written
+for this repository specifically to contain it. That is the positive control, not a finding.
+
+### Undecided: redb panics on an image whose file is shorter than its header's layout
+
+The full sweep produced one candidate that is not obviously ours. On ext4 `data=ordered`
+with 256 KiB values, 11 states out of 704 make redb's query tool abort on open:
+
+```text
+thread 'main' panicked at redb-3.1.3/src/tree_store/page_store/page_manager.rs:237:9:
+assertion failed: storage.raw_file_len()? >= header.layout().len()
+```
+
+The image has the database header persisted while an earlier `ftruncate` that grew the file
+did not persist, so the file is smaller than the layout its own header describes. redb's
+protocol for growing the file, from the captured trace, is:
+
+```text
+ftruncate main.redb len=2109440    grow the file
+pwrite    off=1576960 len=524288   data in the newly available region
+pwrite    off=0       len=320      the header, which references the new layout
+fdatasync                          the commit
+```
+
+The failing states drop an `ftruncate` issued after the last `fdatasync`, and keep a later
+write.
+
+**Why this is not filed.** The question that decides it is whether ext4 `data=ordered` can
+leave a data write persisted while an earlier `ftruncate` on the same file is not, with no
+intervening persistence call. Our model permits it: `docs/model.md` states that operations
+persist in program order only under `data=journal`. But ext4 journals metadata in ordered
+transactions, and an `ftruncate` is metadata, so an argument exists that the size change
+cannot be missing once anything issued after it has committed. Nothing in the sources cited
+in `docs/model.md` settles this either way, and `CLAUDE.md` is explicit that when it is
+unclear whether a behavior is a violation, the default is that our model is wrong.
+
+Two further reasons for caution. redb already has a regression test for a symptom of this
+shape — `tests/crash_consistency.rs`, quoted in the Phase 0 journal entry, describes
+`Corrupted("File truncated below stored layout")` — so a report that does not settle the
+legality question adds nothing they do not have. And the assertion is reached through
+`check_integrity`, which is documented as unnecessary during normal operation, so the
+severity of an abort there is not obvious.
+
+**What would settle it.** A test that writes the same sequence directly against a real ext4
+`data=ordered` filesystem, crashes it at the block layer rather than by replaying a modelled
+subset, and observes whether the header can reach the disk while the size change does not.
+That is a filesystem-level experiment, and it is the thing to do next.
 
 ## Candidate violations, triaged
 
@@ -26,10 +71,11 @@ the ones `CLAUDE.md` requires: real bug, our model wrong, or undecided.
 | `CORRUPT_INVARIANT` on redb, 20 states | Phase 4 sweep | Our model wrong | redb's `check_integrity` returns `Ok(false)` for "failed but was repaired". Repair after an unclean shutdown is redb's documented, correct behavior; reading it as corruption reported the feature as the bug. |
 | `RECOVERY_FAILED` on redb at early crash points | Phase 4 sweep | Our model wrong | The crash point caught redb midway through creating its file, before anything had been acknowledged. A crash point that was promised nothing cannot have lost anything. |
 | `LOST_ACKED` on `targets/unsafe-kv` | Phase 3 positive control | Real bug | The rename-based update protocol with no `fsync`, announcing durability anyway. The application is ours and was written to contain this bug. |
+| `RECOVERY_FAILED` on redb, 11 states, `large` shape | Phase 4 sweep | **Undecided** | redb aborts on an image whose file is shorter than its header's layout. Whether the image is legal on ext4 `data=ordered` is unresolved. See above. |
 
-Six candidates, six model defects, one deliberate bug. **Nothing undecided**, which is worth
-stating plainly: it is not evidence of rigour so much as evidence that the sweep has not yet
-reached the region where hard calls live.
+Seven candidates: six model defects, one deliberate bug in our own control, one undecided.
+The undecided one is the only candidate the tool has produced that is not obviously ours,
+and it took roughly 4,000 states across four filesystems to reach it.
 
 ## Verified clean
 
