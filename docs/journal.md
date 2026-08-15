@@ -641,11 +641,32 @@ The implication for how much a clean run is worth is uncomfortable and belongs i
 write-up: the tool's measured false-positive rate against well-behaved targets started at
 100% of findings and only reached zero because two controls kept forcing it down.
 
+### Result
+
+10,942 crash states across 20 filesystem and shape combinations, in 21 minutes. Three
+findings, all the same signature: redb aborts on an image whose file is shorter than its own
+header's layout, on the 256 KiB-value shape, on ext4 `data=ordered`, xfs and btrfs.
+
+The distribution is the interesting part. The signature appears on all three models that
+permit reordering and on none of the states enumerated under ext4 `data=journal`, whose
+model persists operations in program order and therefore cannot drop the `ftruncate` while
+keeping a later write. It also appears on exactly one workload shape, the one with values
+large enough to force redb to grow the file. A finding that tracks the model's permissions
+and the workload's mechanics that precisely is not a random harness fault, but it is also
+not proof that the reordering happens on a real disk. It is triaged undecided.
+
+**A defect the artifact itself exposed.** Running the packaged redb reproducer showed
+`run.sh` asking SQLite's query tool about a redb database and answering "file is not a
+database". An artifact that queries the wrong target does not fail visibly; it reports a
+confident falsehood. The query command is now required rather than defaulted. This is the
+concrete argument for the rule that a bug is not claimed without running its reproducer:
+the first time one was run in anger, it was wrong.
+
 ### Gate status
 
-See `docs/results.md` for the table and `docs/findings.md` for the triage. The
-10,000-state gate is met by the full sweep; the coverage document states plainly that
-write-path coverage was never measured, which is the largest gap in the result.
+All four Phase 4 exit criteria are met. See `docs/results.md` for the table and
+`docs/findings.md` for the triage. The coverage document states plainly that write-path
+coverage was never measured, which is the largest gap in the result.
 
 Phase 5 does not apply: it is "only for violations that survive Phase 4 triage", and none
 did. Nothing is filed, and filing anything on this evidence would be exactly the
