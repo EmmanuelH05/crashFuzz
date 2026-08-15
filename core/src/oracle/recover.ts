@@ -10,9 +10,10 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { redbBinary } from '../campaign/targets'
 import type { RecoveryResult } from './oracle'
 
-const QUERY_TOOL = join(
+const SQLITE_QUERY_TOOL = join(
   import.meta.dir,
   '..',
   '..',
@@ -22,6 +23,58 @@ const QUERY_TOOL = join(
   'build',
   'sqlite-query',
 )
+
+/**
+ * Runs a target's query tool against a database and reads its report.
+ *
+ * The protocol is the same for every target: `integrity=ok|failed` on one line,
+ * then `<key> <digest>` per value, a non-zero exit meaning the target would not
+ * open the image. Keeping it uniform is what lets the pipeline treat the
+ * control and the primary identically.
+ */
+function queryTarget(binary: string, dbPath: string, absentDetail: string): RecoveryResult {
+  // An image from before the database file was created is not a recovery
+  // failure. The target cannot be blamed for refusing to open a file that the
+  // crash point predates, and nothing is acknowledged that early for it to have
+  // lost. It is reported as an empty database, which leaves the oracle free to
+  // flag anything that was acknowledged and is now missing.
+  if (!existsSync(dbPath)) {
+    return { status: 'opened', integrityOk: true, values: new Map(), detail: absentDetail }
+  }
+
+  const proc = Bun.spawnSync([binary, dbPath])
+  const stderr = proc.stderr.toString().trim()
+
+  if (proc.exitCode !== 0) {
+    return { status: 'failed', detail: stderr || `query exited ${proc.exitCode}` }
+  }
+
+  let integrityOk = false
+  const values = new Map<string, string>()
+
+  for (const line of proc.stdout.toString().split('\n')) {
+    if (line === '') continue
+
+    if (line.startsWith('integrity=')) {
+      integrityOk = line.slice('integrity='.length) === 'ok'
+      continue
+    }
+
+    const [key, digest] = line.split(' ')
+    if (key !== undefined && digest !== undefined) values.set(key, digest)
+  }
+
+  return { status: 'opened', integrityOk, values, detail: stderr || undefined }
+}
+
+/** Recovery for redb, the primary target. Opening the file is its recovery path. */
+export function recoverRedb(dbPath: string): RecoveryResult {
+  return queryTarget(
+    redbBinary('redb-query'),
+    dbPath,
+    'database file absent at this crash point',
+  )
+}
 
 /**
  * Recovery for the unsafe key-value store, the positive control.
@@ -54,42 +107,5 @@ export function recoverFileKv(mountDir: string): RecoveryResult {
  * thousands of images and some of them are expected not to open.
  */
 export function recoverSqlite(dbPath: string): RecoveryResult {
-  // An image from before the database file was created is not a recovery
-  // failure. The target cannot be blamed for refusing to open a file that the
-  // crash point predates, and nothing is acknowledged that early for it to have
-  // lost. It is reported as an empty database, which leaves the oracle free to
-  // flag anything that was acknowledged and is now missing.
-  if (!existsSync(dbPath)) {
-    return {
-      status: 'opened',
-      integrityOk: true,
-      values: new Map(),
-      detail: 'database file absent at this crash point',
-    }
-  }
-
-  const proc = Bun.spawnSync([QUERY_TOOL, dbPath])
-  const stdout = proc.stdout.toString()
-  const stderr = proc.stderr.toString().trim()
-
-  if (proc.exitCode !== 0) {
-    return { status: 'failed', detail: stderr || `query exited ${proc.exitCode}` }
-  }
-
-  let integrityOk = false
-  const values = new Map<string, string>()
-
-  for (const line of stdout.split('\n')) {
-    if (line === '') continue
-
-    if (line.startsWith('integrity=')) {
-      integrityOk = line.slice('integrity='.length) === 'ok'
-      continue
-    }
-
-    const [key, digest] = line.split(' ')
-    if (key !== undefined && digest !== undefined) values.set(key, digest)
-  }
-
-  return { status: 'opened', integrityOk, values, detail: stderr || undefined }
+  return queryTarget(SQLITE_QUERY_TOOL, dbPath, 'database file absent at this crash point')
 }

@@ -1,0 +1,25 @@
+# Phase 4 workload for the primary target.
+#
+# Two binaries: one that writes under interception and emits the marker channel,
+# one that opens a crash image and reports what redb's own recovery recovered.
+
+[package]
+name = "redb-workload"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+redb = "3"
+sha2 = "0.10"
+
+[[bin]]
+name = "redb-workload"
+path = "src/workload.rs"
+
+[[bin]]
+name = "redb-query"
+path = "src/query.rs"
+
+[profile.release]
+debug = true
