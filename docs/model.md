@@ -53,6 +53,19 @@ the filesystem it was enumerated for.
   Recorded rather than fixed, because changing it is a persistence model change and
   `CLAUDE.md` requires both readings argued in `docs/journal.md` first.
 
+- **A kept write persists together with its size effect.** The replayer applies a kept
+  write through a real filesystem, so a write past EOF extends the materialized file. On
+  ext4 the data and the size effect part ways: the data persists by writeback, while the
+  size update is journaled metadata that jbd2 commits strictly after every earlier metadata
+  change, including any dropped `ftruncate`'s. A state that drops an earlier size change
+  therefore cannot legally carry a later one, and the materialized file can be longer than
+  any length ext4 could leave. This over-approximation invented no finding against released
+  redb — its open-path assert compares against the header's layout, which dwarfs either
+  length — but it did make the fixed master reject an image whose strictly-legal variant it
+  recovers, which is a false positive in miniature. Both readings are argued in the Phase 5
+  journal entry. Divergence recorded rather than fixed for the same reason as the
+  `fdatasync` one above.
+
 ## The oracle
 
 Correct recovery, operationally:

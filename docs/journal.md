@@ -674,6 +674,183 @@ unrecoverable mistake `CLAUDE.md` warns about.
 
 ---
 
+## 2026-08-16 — Phase 5: The undecided finding resolves to a real bug, already fixed upstream
+
+### Tried
+
+Three investigations, in the order that turned out to matter least to most.
+
+**Upstream archaeology.** The redb clone used for the interception gate was unshallowed and
+searched for the strings in our finding. Commit `fd82ced` (2026-06-13, merged as
+[PR #1276](https://github.com/cberner/redb/pull/1276), "Fix database becoming permanently
+unopenable after a crash during a file-growing commit") describes our state exactly, in the
+maintainer's own words: "grow() extends the database file with set_len, and the only barrier
+ordering that extension against the subsequent header write was the commit's final fsync. ...
+if a crash persisted that header but not the file extension, every subsequent open failed ...
+permanent data loss — even though the previous durable state was intact. In v4.1.0 and
+earlier the equivalent open-path assert panicked instead." Two follow-ups, `c002202` and
+`88881b8` ([PR #1293](https://github.com/cberner/redb/pull/1293)), make the open path
+recover such images instead of rejecting them. `git tag --contains` shows none of the three
+in any release: the newest tag is v4.1.0 (2026-04-19), the prevention fix landed 2026-06-13.
+By the maintainer's own account quoted above, "v4.1.0 and earlier" panicked; we verified
+that directly for 3.1.3 (what the campaign tested) and 4.1.0 (the newest tag) and take the
+maintainer's word for the rest, since older releases use a different page store we did not
+build against. The maintainer had already found, fixed, and described this — before we ever
+chose redb as the target, unknown to us until today.
+
+**The block-level experiment `docs/findings.md` called for.** On a dedicated ext4 loop
+device (kernel 6.8.0-136-generic), mounted `data=ordered,commit=300,noatime` so the journal
+— which carries the size change — cannot commit during the run: write an 8 MiB base and
+fsync it, then `ftruncate` to 16 MiB and overwrite 320 bytes at offset 0 with no persistence
+call, wait 45 s for background writeback (`vm.dirty_expire_centisecs=3000`), and copy the
+backing file while still mounted. Mounting the copy replays the journal exactly as a
+post-crash mount would. Result: file length 8 MiB, offset 0 carrying the new bytes. The
+data overwrite reached the disk; the earlier `ftruncate` did not. The same run under
+`data=journal` shows the old bytes and the old length — no reordering — matching the
+campaign's distribution, where the signature appeared under every model that permits the
+reordering and never under `data=journal`. The reordering our model permitted is one ext4
+actually performs.
+
+**The version matrix.** The packaged image, tested against three redbs (each on a copy,
+because a fixed redb repairs the image it opens and would destroy the evidence):
+
+| redb | Result on the packaged image |
+|---|---|
+| 3.1.3 (tested by the campaign) | panic: `assertion failed: storage.raw_file_len()? >= header.layout().len()` |
+| v4.1.0 (newest release) | same panic, `page_manager.rs:231` |
+| master `cff6e50` (all three fixes) | `Corrupted: File length does not correspond to a valid region layout: file_len=8650240` |
+
+That last row was supposed to be the happy ending and was not, which led to the defect below.
+
+### Failed
+
+**The materialized image is not byte-for-byte a state ext4 can produce, and the difference
+almost indicted the fixed version.** Our image is 8,650,240 bytes long. The last persisted
+`ftruncate` set 8,425,472; the extra 224,768 bytes exist because the replayer keeps a data
+write by writing it through a real filesystem, where a write past EOF implicitly extends the
+file. On ext4 that extension is an inode-size update that rides the journal, and the
+journal's transactions commit in order — jbd2 cannot commit a later transaction while an
+earlier one is lost. A state that drops the `ftruncate` at stamp 272 therefore cannot carry
+any later size effect either: the strictly legal length is exactly 8,425,472. Re-testing
+with the file truncated to that length: 3.1.3 and v4.1.0 still panic — the assert only
+compares against the header's 16 MiB layout, so the exact shortfall is irrelevant — and
+master now opens, passes its own integrity check, and recovers k1 through k15 with all
+fifteen digests equal to the acknowledged ones from the marker channel. The finding against
+released versions survives unchanged; the apparent finding against master was our artifact.
+That is the seventh defect this tool has produced, the first found by Phase 5 verification
+rather than by a control, and the reason the hostile-review step exists.
+
+### Learned
+
+The gap is the honest headline, and it is worse than "we found this late" — the fix was
+already public when we chose the target. Target selection is `4e8c10c`, 2026-08-15. The fix,
+`fd82ced`, is 2026-06-13: 63 days earlier. v4.1.0, the newest tagged release, shipped
+2026-04-19, 116 days before this project's first commit (`389ca2b`, 2026-08-13) — so redb
+3.1.3 was never
+"current"; it is simply what `redb = "3"` in `targets/redb-workload/Cargo.toml` resolved to,
+unpinned to any check of what was newer. `docs/target-selection.md` criterion 4 is "active
+maintainers who respond to issues — check the last 90 days before committing." The fix
+landed inside that window. Had that check pulled the commit log instead of the issue
+tracker, this exact fix was there to find before a single trace was captured. The tool found
+a real, maintainer-acknowledged, permanent-data-loss bug with no knowledge of the fix — the
+signature, the shape it fired on, and the filesystems it fired on all match the upstream
+description — and it found it on evidence that was sitting in the open the whole time.
+Independent rediscovery is validation of the method, not a disclosure.
+
+A finding's evidence should be verified against the version that claims to fix it. The
+false indictment of master was invisible at every earlier gate because every earlier gate
+ran only the released version, where the panic masks the image's length.
+
+### Model decision
+
+**Question.** When a crash state keeps a data write lying beyond the file's persisted
+length, does the file's length grow to cover it?
+
+**Reading A — a kept operation keeps its full effect.** The replayer applies kept writes
+through a real filesystem, so a write past EOF extends the file, as POSIX defines for the
+running system. One operation, one unit: either the write persisted, with its data and its
+size effect, or it did not. This is what the enumerator implements, and it is how
+ALICE-style tools treat operations.
+
+**Reading B — the data and the size effect part ways.** The write's data reaches disk by
+writeback, with no journal involvement under `data=ordered`. Its size effect is an inode
+metadata update in a journal transaction, ordered by jbd2 after every earlier metadata
+change, including the dropped `ftruncate`'s. A crash state that drops an earlier journaled
+size change cannot keep a later one, and a kept data write past persisted EOF contributes
+data to unreferenced blocks, not length.
+
+**Conclusion.** Reading B is what ext4 does; the experiment above shows i_size staying at
+the base value while the data page hit the disk. The enumerator implements Reading A. The
+divergence is recorded in `docs/model.md` beside the `fdatasync` one rather than fixed,
+because changing it is a persistence-model change to Phase 2 code that every existing result
+was produced under, and because its one observed consequence — the image length — was
+re-verified by hand for the one finding it could affect. Reading A's virtue is that it never
+under-approximates what a write can leave behind; its cost is states slightly beyond what
+ext4 can produce, which is a false-positive risk, and the asymmetry says that risk is the
+one this project cannot carry silently.
+
+### Gate status
+
+Phase 5 applies for the first time: the candidate survived triage as a real bug in released
+redb. Its disposition is unusual — the maintainer acknowledged and fixed the bug class
+before we found it, so there is no report to file that adds anything; a duplicate of a
+fixed bug spends the credibility this project exists to protect. What remains actionable
+upstream is that no released version contains the fix. `docs/disclosure.md` holds the
+hostile self-review, the report that would have been filed, and a short release inquiry
+that could be. Nothing has been sent; sending anything is the operator's call.
+
+The clean-machine box from Phase 3 is now met as well: a second VM was provisioned fresh
+from `vm/lima.yaml`, having never run any part of this pipeline, the artifact directory was
+copied in, and `run.sh` reproduced the recorded panic exactly.
+
+### Addendum — a code review caught the reproducer wasn't actually one command
+
+A review pass over this session's changes found that the first version of this claim was
+wrong in a way the clean-VM run above did not catch: it manually built `redb-query` as a
+separate step before running `run.sh`, so the "one command" property was never actually
+exercised. `run.sh` itself hardcoded an absolute path to the query binary and never used the
+`CRASHFUZZ_REPO` it prompted the reader to set — a stale artifact of an earlier draft. The
+generated artifact's own `README.md` already claimed "the script builds the query tool if it
+is not already built," which was false.
+
+Fixed in `core/src/oracle/reproducer.ts`: `run.sh` now checks whether its query binary
+exists and, if not, runs a packaged build command before proceeding. `campaign-run.ts` wires
+the redb build through `$repo`, which the script resolves from `CRASHFUZZ_REPO` or its own
+location, so the *repo path* is no longer baked into the artifact. That is independent of the
+build *target*: `CARGO_TARGET_DIR` still points at the fixed `/var/lib/crashfuzz/cargo-target`
+this project has always used, so the environment prerequisite below still applies. A second
+bug surfaced while fixing the first: the build command was substituted into an already
+double-quoted bash string without escaping its own embedded quotes, which worked only by
+accident of string concatenation and would have broken on a repo path containing a space.
+Both are covered by tests (`core/tests/integration/reproducer.test.ts`) using a
+space-containing path specifically, since that is exactly the input the accidental version
+would have silently mishandled.
+
+Re-verified end to end: the packaged artifact directory alone, copied onto the same clean VM
+with no prior build, reproduced the panic from `CRASHFUZZ_REPO=... bash run.sh` in 6 seconds
+— the query tool built itself. Another entry for the same list as the date error and the
+materialization-length imprecision above: reviewing the write-up found a defect in the thing
+the write-up was describing as already correct.
+
+### Addendum — a second review pass found the "clean machine" claim still overreached
+
+`/var/lib/crashfuzz` is created and made world-writable by `vm/lima.yaml`'s provisioning
+step, run once as root. It is not something `git clone` produces. A second review pass
+verified this directly: on the same VM, an unprivileged attempt to create a sibling
+directory under `/var/lib` fails with `EACCES`, and the packaged `run.sh`'s build command
+fails identically under `set -euo pipefail` if pointed at a location that has not been
+provisioned this way. "Reproduces on a machine you have not touched" was true only of a
+machine built from this project's own VM definition — which is also true of every other
+prerequisite the Requirements section already states (ext4/xfs/btrfs, loop devices, a Rust
+toolchain — none of those exist on a bare machine either) — but the run.sh header and the
+artifact's own generated `README.md` did not say so, so a reader could take "one command"
+to mean zero prerequisites. Both now state the requirement explicitly rather than leaving it
+implicit. The claims in `CLAUDE.md`, `README.md`, and `docs/disclosure.md` were reworded to
+say what was actually verified: never having run this specific pipeline, on a machine
+meeting the Requirements section, not a bare machine with nothing installed.
+
+---
+
 <!--
 Entry template:
 
