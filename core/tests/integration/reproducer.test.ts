@@ -13,7 +13,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createImage, withMount } from '../../src/image/image'
 import { writeReproducer } from '../../src/oracle/reproducer'
@@ -151,5 +151,103 @@ describe('writeReproducer', () => {
     })
 
     expect(script.stdout.toString()).toContain('queried-by-the-right-target')
+  }, 300_000)
+
+  test('builds the query tool from source when it is not already built at the packaged path', () => {
+    // On a fresh clone the query binary this artifact was built against does
+    // not exist yet. CLAUDE.md and the Phase 5 gate both require the artifact
+    // to run "from a fresh clone with one command", so the script has to build
+    // it rather than fail on a path that only ever existed on our machine.
+    const outDir = join(workdir, 'artifact-build')
+    const tracePath = join(workdir, 'trace-for-build.jsonl')
+    writeFileSync(tracePath, `${JSON.stringify({ rec: 'header', v: 1, pid: 1 })}\n`)
+
+    const notYetBuilt = join(workdir, 'not-yet-built-tool')
+    rmSync(notYetBuilt, { force: true })
+
+    writeReproducer(
+      {
+        signature: 'RECOVERY_FAILED|missing:ftruncate@main.redb',
+        occurrences: 1,
+        state: { crashPoint: 0, persisted: [], partial: [] },
+        imagePath: join(workdir, 'finding.img'),
+        violation: {
+          violationClass: 'RECOVERY_FAILED',
+          crashStamp: 1,
+          op: null,
+          key: '',
+          expected: '<opens and recovers>',
+          actual: 'assertion failed',
+        },
+      },
+      {
+        outDir,
+        tracePath,
+        dbName: 'main.redb',
+        filesystem: 'ext4',
+        queryCommand: notYetBuilt,
+        buildCommand: `printf '#!/bin/sh\\necho queried-by-the-built-target\\n' > "${notYetBuilt}" && chmod +x "${notYetBuilt}"`,
+      },
+    )
+
+    expect(existsSync(notYetBuilt)).toBe(false)
+
+    const script = Bun.spawnSync(['bash', join(outDir, 'run.sh')], {
+      env: { ...process.env, CRASHFUZZ_REPO: REPO_ROOT },
+    })
+
+    expect(script.stdout.toString()).toContain('queried-by-the-built-target')
+  }, 300_000)
+
+  test('runs a build command that references a source path containing a space', () => {
+    // The template embeds buildCommand inside build="...", so a build command
+    // that itself contains double quotes (as one referencing $repo needs to)
+    // can break out of that quoting. This stays hidden as long as $repo has
+    // no spaces in it; a repo cloned somewhere like "/Users/a b/crashFuzz"
+    // would expose it. The build's output path stays space-free, matching
+    // where the real build command actually writes it (a fixed VM path); the
+    // space sits in the source side of the command, the part the escaping
+    // has to survive.
+    const spacedSourceDir = join(workdir, 'a dir with spaces', 'src')
+    mkdirSync(spacedSourceDir, { recursive: true })
+    writeFileSync(join(spacedSourceDir, 'payload'), 'built-from-a-spaced-path')
+
+    const notYetBuilt = join(workdir, 'not-yet-built-tool-spaced')
+    const outDir = join(workdir, 'artifact-build-spaced')
+    const tracePath = join(workdir, 'trace-for-build-spaced.jsonl')
+    writeFileSync(tracePath, `${JSON.stringify({ rec: 'header', v: 1, pid: 1 })}\n`)
+
+    writeReproducer(
+      {
+        signature: 'RECOVERY_FAILED|missing:ftruncate@main.redb',
+        occurrences: 1,
+        state: { crashPoint: 0, persisted: [], partial: [] },
+        imagePath: join(workdir, 'finding.img'),
+        violation: {
+          violationClass: 'RECOVERY_FAILED',
+          crashStamp: 1,
+          op: null,
+          key: '',
+          expected: '<opens and recovers>',
+          actual: 'assertion failed',
+        },
+      },
+      {
+        outDir,
+        tracePath,
+        dbName: 'main.redb',
+        filesystem: 'ext4',
+        queryCommand: notYetBuilt,
+        // test -f only succeeds if the spaced path survives as one argument.
+        // Broken escaping splits it and this &&-chain never reaches printf.
+        buildCommand: `test -f "${spacedSourceDir}/payload" && printf '#!/bin/sh\\necho built-from-a-spaced-path\\n' > "${notYetBuilt}" && chmod +x "${notYetBuilt}"`,
+      },
+    )
+
+    const script = Bun.spawnSync(['bash', join(outDir, 'run.sh')], {
+      env: { ...process.env, CRASHFUZZ_REPO: REPO_ROOT },
+    })
+
+    expect(script.stdout.toString()).toContain('built-from-a-spaced-path')
   }, 300_000)
 })

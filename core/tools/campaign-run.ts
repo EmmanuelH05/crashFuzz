@@ -31,6 +31,21 @@ const SHIM_SO = join(REPO_ROOT, 'shim', 'build', 'shim.so')
 const SCRATCH = '/var/lib/crashfuzz'
 const DB_NAME = 'main.redb'
 
+/**
+ * The query command and build command a packaged redb finding ships with.
+ * queryCommand matches where the campaign's own build put the binary;
+ * buildCommand reproduces that build through $repo, which the packaged
+ * run.sh resolves at the machine it is actually run on, so a fresh clone
+ * with no prior build can still run the reproducer in one command.
+ */
+export function redbQueryAndBuildCommand(): { queryCommand: string; buildCommand: string } {
+  return {
+    queryCommand: redbBinary('redb-query'),
+    buildCommand:
+      'CARGO_TARGET_DIR=/var/lib/crashfuzz/cargo-target cargo build --release --manifest-path "$repo/targets/redb-workload/Cargo.toml"',
+  }
+}
+
 function captureTrace(shape: string, operations: number, workdir: string) {
   const liveDir = mkdtempSync(join(workdir, `live-${shape}-`))
   const traceDir = mkdtempSync(join(workdir, `trace-${shape}-`))
@@ -104,7 +119,7 @@ function main(argv: string[]): number {
         tracePath: capture.tracePath,
         dbName: DB_NAME,
         filesystem: run.config.filesystem,
-        queryCommand: redbBinary('redb-query'),
+        ...redbQueryAndBuildCommand(),
       })
     }
 

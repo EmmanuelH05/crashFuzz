@@ -37,9 +37,20 @@ export type ReproducerOptions = {
    * The query tool for the target this finding came from, as a shell command
    * taking the database path. An artifact that asks a different target reports
    * a confident and false observation rather than failing visibly, so this is
-   * required rather than defaulted.
+   * required rather than defaulted. Substituted unquoted into a bash array
+   * literal so a multi-word command (a binary plus flags) splits into separate
+   * arguments as intended; a path containing a space would split incorrectly
+   * instead, so this and dbName must not contain one.
    */
   queryCommand: string
+  /**
+   * Shell command that builds the query tool, run only when the path in
+   * queryCommand does not already exist. Written to use $repo, which the
+   * script resolves from CRASHFUZZ_REPO or its own location. Without this the
+   * artifact only runs on the machine that packaged it, which fails the
+   * "reproduces from a fresh clone" gate.
+   */
+  buildCommand?: string
 }
 
 /**
@@ -65,10 +76,18 @@ function tracePrefix(tracePath: string, crashPoint: number): string {
   return `${kept.join('\n')}\n`
 }
 
+/** Escapes backslash, double quote and backtick for substitution into a double-quoted bash string. `$` is left alone so parameter expansion like `$repo` still works. */
+function escapeForDoubleQuotedShell(value: string): string {
+  return value.replace(/[\\"`]/g, '\\$&')
+}
+
 const RUN_SCRIPT = `#!/usr/bin/env bash
 # Replays one crash image through the target's own recovery.
 #
-# Needs Linux, root for the loop device, and a build of the query tool:
+# Needs Linux, root for the loop device, and the environment this project's
+# Requirements section documents: a Rust toolchain and /var/lib/crashfuzz
+# writable (vm/lima.yaml provisions both). Builds the query tool itself if
+# it is not already there:
 #
 #   CRASHFUZZ_REPO=/path/to/crashfuzz bash run.sh
 #
@@ -83,6 +102,15 @@ repo="\${CRASHFUZZ_REPO:-$here/../../..}"
 # artifact was written, because asking a different target reports a confident
 # and false observation rather than failing visibly.
 query=(__QUERY_COMMAND__)
+build="__BUILD_COMMAND__"
+
+# A fresh clone has no build of the query tool at the path above. Build it
+# rather than fail: the "reproduces on a machine you have not touched" gate
+# means this artifact, not an already-built binary, is what has to be enough.
+if [[ -n "$build" ]] && [[ ! -x "\${query[0]}" ]]; then
+  echo "query tool not found at \${query[0]}, building it: $build" >&2
+  eval "$build"
+fi
 
 mnt="$(mktemp -d)"
 loop="$(sudo losetup --find --show "$here/state.img")"
@@ -120,8 +148,10 @@ directory; nothing here re-runs the enumeration.
 CRASHFUZZ_REPO=/path/to/crashfuzz bash run.sh
 \`\`\`
 
-Requires Linux, a loop device, and sudo for the mount. The script builds the
-query tool if it is not already built.
+Requires Linux, a loop device, sudo for the mount, and the environment this
+project's Requirements section documents (a Rust toolchain, /var/lib/crashfuzz
+writable — \`vm/lima.yaml\` provisions both). If the query tool this finding
+was built against is not already there, the script builds it first.
 
 ## What the finding claims
 
@@ -165,10 +195,9 @@ export function writeReproducer(finding: PackagedFinding, options: ReproducerOpt
 
   writeFileSync(
     join(options.outDir, 'run.sh'),
-    RUN_SCRIPT.replace('__QUERY_COMMAND__', options.queryCommand).replace(
-      '__DB_NAME__',
-      options.dbName,
-    ),
+    RUN_SCRIPT.replace('__QUERY_COMMAND__', () => options.queryCommand)
+      .replace('__BUILD_COMMAND__', () => escapeForDoubleQuotedShell(options.buildCommand ?? ''))
+      .replace('__DB_NAME__', () => options.dbName),
   )
 
   const claim =
