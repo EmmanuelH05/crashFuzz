@@ -1,9 +1,7 @@
 # Coverage
 
-> **Status: not written. Required by the Phase 4 gate.**
->
-> What was not tested, and why. Written as gaps are identified rather than assembled at
-> the end.
+What was not tested, and why. Written as gaps were identified during Phases 1 through 4
+rather than assembled at the end.
 
 ## Known gaps
 
