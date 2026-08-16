@@ -302,10 +302,9 @@ Execution plan: `docs/EXECUTION-PLAN.md`. Decision rationale: `docs/journal.md`.
 
 ## Current state
 
-Last code commit: pending this session's commit, 2026-08-16. Phases 0 through 4 are
-complete. Phase 5 is resolved — real bug, one box deliberately unmet, see below — and Phase 6
-is complete. Update this line when code lands, or it will describe a tree that no longer
-exists.
+Last code commit: `8d441d5`, 2026-08-16. Phases 0 through 4 are complete. Phase 5 is
+resolved — real bug, one box deliberately unmet, see below — and Phase 6 is complete. Update
+this line when code lands, or it will describe a tree that no longer exists.
 
 This section is a summary and goes stale. Everything above it is the spec and outranks it.
 Where it disagrees with another document, the other document wins:
@@ -342,6 +341,7 @@ Commits, newest first (`git log --oneline` is authoritative; update this block w
 drifts rather than trust it blindly):
 
 ```text
+8d441d5 phase6: write-up complete
 55ed3a6 fix: packaged reproducers build their own query tool
 46c63e2 phase5: redb finding resolves from undecided to a confirmed real bug
 cd12b9c phase4: campaign complete, 10942 states, 3 findings all undecided
@@ -369,8 +369,6 @@ ee04adf phase2: torn writes, seeded crash point sampling, determinism test
 4e8c10c phase0: prior art, positioning, target=redb control=sqlite
 389ca2b chore: scaffold repo, execution environment, and phase plan
 ```
-
-This Phase 6 write-up commit lands on top of `55ed3a6` and is added here once made.
 
 ### What exists
 
