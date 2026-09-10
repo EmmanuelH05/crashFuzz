@@ -4,7 +4,7 @@ Phase 5 record for the one finding that survived triage:
 `RECOVERY_FAILED|missing:ftruncate@main.redb`. Evidence in `docs/findings.md`, mechanism
 and verification in the Phase 5 journal entry.
 
-## Status: nothing filed, deliberately
+## Status: nothing filed, nothing left to send
 
 The maintainer found, fixed, and documented this bug class on master before we found it —
 commit `fd82ced`, [PR #1276](https://github.com/cberner/redb/pull/1276), merged 2026-06-13,
@@ -13,12 +13,15 @@ with open-path recovery follow-ups `c002202` and `88881b8`
 of something already diagnosed more precisely by its own author. Filing it would spend
 credibility and add nothing.
 
-What is still true and actionable: **no released version contains the fix.** The newest
-release is v4.1.0 (2026-04-19); `redb = "4"` from crates.io today panics on open — losing
-an intact, fully recoverable database — on a crash state this repository demonstrates a
-stock ext4 `data=ordered` can produce. The one thing worth sending upstream is the release
-inquiry drafted at the bottom of this document. **It has not been sent.** Sending anything
-external is the operator's decision, not this tool's.
+On 2026-08-16 one thing remained actionable: no released version contained the fix, so a
+release inquiry was drafted at the bottom of this document and left unsent. redb v4.2.0,
+tagged and published to crates.io on 2026-08-17, contains all three commits (checked
+2026-09-10 with `git merge-base --is-ancestor`). Against a copy of the
+packaged image truncated to its strictly legal length, 4.2.0 opens, passes its own integrity
+check, and returns k1 through k15 with every digest equal to the acknowledged one; 3.1.3 and
+4.1.0 still panic on the same image. The release answers the inquiry's question, so the
+inquiry was withdrawn unsent. Nothing about this finding has been sent to anyone, and
+nothing remains to send. Details in the 2026-09-10 addendum to the Phase 5 journal entry.
 
 ## Hostile self-review
 
@@ -31,6 +34,7 @@ in this document. The residual claim is only about releases: 3.1.3 and 4.1.0 —
 this project tested and the newest tag — both panic on this image, and `git tag --contains`
 against all 75 tags confirms none contain the fix. The inquiry below asks one question —
 whether a release containing the fix is planned — and claims nothing broader than that.
+(This answer is as of 2026-08-16. v4.2.0 shipped the fix the next day; see Status.)
 
 **"Your image is synthetic. A real ext4 would never leave that state."** Two answers. The
 state's essential shape — header persisted, earlier file extension not, no intervening
@@ -65,6 +69,7 @@ evidence that upstream considers the state worth handling regardless of rate.
 ## The report that would have been filed
 
 Kept because Phase 5 requires it, and because writing it is how the review above happened.
+Written 2026-08-16, when 4.1.0 was the newest release; v4.2.0 (2026-08-17) contains the fix.
 
 > **redb 3.1.3 and 4.1.0 (newest release): Database::open panics, permanently losing a
 > recoverable database, on a crash image whose file is shorter than its header's layout**
@@ -96,9 +101,10 @@ Kept because Phase 5 requires it, and because writing it is how the review above
 > image, trace prefix, and one-command run script; reproduced from the artifact alone on a
 > freshly provisioned machine.
 
-## Draft release inquiry — NOT SENT
+## Draft release inquiry — withdrawn, not sent
 
-For the operator to send or discard. It references upstream's own commits because it is
+Withdrawn 2026-09-10: redb v4.2.0 (2026-08-17) is the release it asks about. Kept as the
+record of what would have been sent. It references upstream's own commits because it is
 about releasing them, not about reporting anything new.
 
 > Title: Release containing the file-growth durability fix (#1276)?

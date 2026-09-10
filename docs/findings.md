@@ -6,18 +6,19 @@ and is reported as one.
 
 ## Bugs
 
-**One real bug, independently rediscovered.** Tested directly against 3.1.3 (what the
-campaign ran) and 4.1.0 (the newest tagged release), redb permanently loses an intact
-database to a crash-legal image: `Database::open` panics on an assert instead of running
-the recovery that — as the fixed master proves — would have restored every acknowledged
-operation. `git tag --contains` against all 75 tags confirms no released version contains the fix,
-though only 3.1.3 and 4.1.0 were tested directly; older releases (0.x–2.x) use a different
-page store and were not checked. The maintainer found and fixed the same bug on
-master on 2026-06-13 — before target selection, not after, and unknown to us until after
-triage; see the Phase 5 journal entry. Because the bug is already acknowledged and fixed
-upstream, there is no report to file that adds anything — see `docs/disclosure.md` for the
-report that would have been filed and for what remains actionable. Nothing has been sent to
-anyone.
+**One real bug, independently rediscovered, fixed in redb 4.2.0.** Tested directly against
+3.1.3 (what the campaign ran) and 4.1.0, redb permanently loses an intact database to a
+crash-legal image: `Database::open` panics on an assert instead of running the recovery
+that would have restored every acknowledged operation. On 2026-08-16, `git tag --contains`
+against all 75 tags then published confirmed no release contained the fix; older releases
+(0.x–2.x) use a different page store and were not checked. The maintainer found and fixed
+the same bug on master on 2026-06-13 — before target selection, not after, and unknown to
+us until after triage; see the Phase 5 journal entry. redb v4.2.0, published 2026-08-17,
+contains the fix, and on 2026-09-10 it recovered the strictly legal image with all fifteen
+acknowledged values intact where 3.1.3 and 4.1.0 still panic. Because the bug was already
+acknowledged and fixed upstream there is no report to file that adds anything, and with
+4.2.0 released there is no release inquiry to send either — see `docs/disclosure.md`.
+Nothing has been sent to anyone.
 
 The other confirmed bug this tool has found is in `targets/unsafe-kv`, an application
 written for this repository specifically to contain it. That is the positive control, not a
@@ -95,8 +96,20 @@ Phase 5 journal entry:
    digests equal to the acknowledged ones in the marker channel. Released versions panic on
    an image from which everything they promised was still recoverable.
 
-The fix is in no release: the newest tag is v4.1.0 (2026-04-19), the fix landed 2026-06-13.
-`redb = "4"` from crates.io today panics on this image.
+**Released in v4.2.0, 2026-08-17.** As of 2026-08-16 the fix was in no release; the newest
+tag was v4.1.0 (2026-04-19). Of the 76 tags published by 2026-09-10, v4.2.0 is the only one
+containing `fd82ced` and `88881b8`. Re-run on 2026-09-10 against fresh copies of the packaged
+image, each database opened twice with the same result both times:
+
+| redb | Packaged length, 8,650,240 | Strictly legal length, 8,425,472 |
+|---|---|---|
+| 3.1.3 | panic, `page_manager.rs:237` | panic, `page_manager.rs:237` |
+| 4.1.0 | panic, `page_manager.rs:231` | panic, `page_manager.rs:231` |
+| 4.2.0 | open fails: `File length does not correspond to a valid region layout` | opens, integrity check passes, k1–k15 returned with all fifteen digests equal to the acknowledged ones |
+
+The 4.2.0 result at the packaged length is the materialization imprecision described next,
+and matches what master `cff6e50` did in Phase 5. 4.2.0 requires Rust 1.90; 4.1.0 required
+1.89.
 
 **A correction the verification forced on us.** The packaged image is 8,650,240 bytes; the
 strictly legal length is 8,425,472, the last persisted `ftruncate`. The difference is the
@@ -124,7 +137,7 @@ the ones `CLAUDE.md` requires: real bug, our model wrong, or undecided.
 | `CORRUPT_INVARIANT` on redb, 20 states | Phase 4 sweep | Our model wrong | redb's `check_integrity` returns `Ok(false)` for "failed but was repaired". Repair after an unclean shutdown is redb's documented, correct behavior; reading it as corruption reported the feature as the bug. |
 | `RECOVERY_FAILED` on redb at early crash points | Phase 4 sweep | Our model wrong | The crash point caught redb midway through creating its file, before anything had been acknowledged. A crash point that was promised nothing cannot have lost anything. |
 | `LOST_ACKED` on `targets/unsafe-kv` | Phase 3 positive control | Real bug | The rename-based update protocol with no `fsync`, announcing durability anyway. The application is ours and was written to contain this bug. |
-| `RECOVERY_FAILED` on redb, `large` shape, on ext4 `data=ordered`, xfs and btrfs | Phase 4 sweep | **Real bug** | redb aborts on an image whose file is shorter than its header's layout, losing a database that was fully recoverable. The reordering was demonstrated at the block layer on ext4 `data=ordered`; the xfs and btrfs occurrences rest on `docs/model.md`'s per-filesystem flags, not on a separate block-level test of those two. Acknowledged mechanism (upstream PR #1276), fixed on master, unreleased. See above. |
+| `RECOVERY_FAILED` on redb, `large` shape, on ext4 `data=ordered`, xfs and btrfs | Phase 4 sweep | **Real bug** | redb aborts on an image whose file is shorter than its header's layout, losing a database that was fully recoverable. The reordering was demonstrated at the block layer on ext4 `data=ordered`; the xfs and btrfs occurrences rest on `docs/model.md`'s per-filesystem flags, not on a separate block-level test of those two. Acknowledged mechanism (upstream PR #1276), fixed on master and released in v4.2.0 (2026-08-17). See above. |
 | Fixed master rejects the packaged image | Phase 5 verification | Our model wrong | The materialized length includes size effects of kept writes that ext4's journal, which lost the earlier `ftruncate`, could not have committed. The strictly legal length recovers cleanly on master. Released versions panic at either length, so the finding stands. |
 
 Nine candidates: seven defects of our own — six model defects found by the controls and one

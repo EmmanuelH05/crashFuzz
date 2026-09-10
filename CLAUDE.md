@@ -223,11 +223,13 @@ If the answer is weak, do not file.
       unmet.** The maintainer had already found, fixed, and described this exact bug on
       master (`fd82ced`, [PR #1276](https://github.com/cberner/redb/pull/1276), merged
       2026-06-13) before this campaign ran. Filing a duplicate of an already-diagnosed,
-      already-fixed bug adds nothing and spends credibility for no reason. What remains true
-      and actionable — no released tag contains the fix — is captured as an unsent draft
-      release inquiry in `docs/disclosure.md`, left for the operator to send or not. This box
-      stays unchecked; the phase is not "complete" by the letter of the gate, only correctly
-      resolved by the judgment call above.
+      already-fixed bug adds nothing and spends credibility for no reason. The one item still
+      actionable on 2026-08-16 — no released tag contained the fix — was drafted as a release
+      inquiry in `docs/disclosure.md` and left unsent. redb v4.2.0 shipped the fix on
+      2026-08-17 and recovers the length-corrected packaged image (verified 2026-09-10), so
+      the inquiry was withdrawn unsent and nothing remains to send. This box stays unchecked;
+      the phase is not "complete" by the letter of the gate, only correctly resolved by the
+      judgment call above.
 
 ### Phase 6: Write-up
 
@@ -330,7 +332,7 @@ If a claim here cannot be traced to one of those, treat it as unverified.
 | 2 — Crash state enumeration | Complete, all five exit criteria met |
 | 3 — Recovery and the oracle | Complete, all four exit criteria met |
 | 4 — The campaign | Complete, all four exit criteria met. 10,942 states, 3 findings, one signature, resolved as a real bug |
-| 5 — Disclosure | Resolved, one box deliberately unmet (not filed): real bug, already fixed upstream and unreleased. Report drafted, deliberately not filed. See `docs/disclosure.md` |
+| 5 — Disclosure | Resolved, one box deliberately unmet (not filed): real bug, fixed upstream and released in redb 4.2.0 (2026-08-17). Report drafted, deliberately not filed; release inquiry withdrawn unsent. See `docs/disclosure.md` |
 | 6 — Write-up | Complete, all five exit criteria met |
 
 Target: **redb** (Rust, Apache-2.0, `github.com/cberner/redb`). Control: **SQLite** (WAL,
@@ -341,6 +343,7 @@ Commits, newest first (`git log --oneline` is authoritative; update this block w
 drifts rather than trust it blindly):
 
 ```text
+957d2b1 docs: sync CLAUDE.md commit list with the phase6 commit hash
 8d441d5 phase6: write-up complete
 55ed3a6 fix: packaged reproducers build their own query tool
 46c63e2 phase5: redb finding resolves from undecided to a confirmed real bug
@@ -461,9 +464,11 @@ stock ext4 `data=ordered` filesystem (`core/tools/ftruncate-vs-overwrite.ts`, wi
 `data=journal` as a negative control that correctly shows none); redb's own maintainer had
 already found and fixed the identical bug on master (`fd82ced`,
 [PR #1276](https://github.com/cberner/redb/pull/1276), merged 2026-06-13 — before this
-project's target selection, not after; no released tag contains it); and the fixed master
+project's target selection, not after; no released tag contained it until v4.2.0 on
+2026-08-17); and the fixed master
 recovers the corrected image cleanly, all 15 acknowledged keys with matching digests, where
-both tested released versions (3.1.3, and 4.1.0 the newest tag) panic on open.
+both released versions tested in Phase 5 (3.1.3, and 4.1.0 the newest tag at the time)
+panic on open.
 
 Verification also caught a defect in our own materialization: the packaged image's length
 included size effects of kept writes that ext4's journal — having lost the earlier
@@ -473,8 +478,14 @@ exact length.
 
 Because the maintainer had already diagnosed and fixed this before the campaign ran, filing
 a report would be a duplicate that spends credibility for no reason. `docs/disclosure.md`
-holds the hostile self-review, the full report as it would have been filed, and a short,
-unsent release-timing inquiry — the one thing about this still worth telling upstream.
+holds the hostile self-review, the full report as it would have been filed, and a
+release-timing inquiry that was withdrawn unsent.
+
+Re-verified 2026-09-10: redb v4.2.0 (published 2026-08-17) contains `fd82ced`, `c002202`
+and `88881b8`, and recovers the length-corrected packaged image with all 15 acknowledged
+digests matching, where 3.1.3 and 4.1.0 still panic. The release answered the inquiry's
+question, so the inquiry was withdrawn. The full suite reran the same day: 77 pass, 0 fail.
+See the 2026-09-10 addendum to the Phase 5 journal entry.
 
 Nine candidates have been triaged across Phases 3 through 5: seven are defects of our own
 (six model defects plus the materialization-length one above), one is the deliberate bug in
@@ -574,3 +585,6 @@ Scratch state on the guest disk, not in the repo:
   Reading B is what ext4 actually does. Recorded as a divergence in `docs/model.md` rather
   than fixed, because closing it is a Phase 2 model change requiring the same argued-both-
   readings treatment as the `fdatasync` divergence beside it.
+- The release inquiry in `docs/disclosure.md` is withdrawn, not pending. redb v4.2.0
+  (2026-08-17) contains the fix and recovers the length-corrected packaged image, verified
+  2026-09-10. Nothing remains to send upstream about this finding; do not send the draft.

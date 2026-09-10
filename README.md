@@ -8,8 +8,9 @@ promised actually held.
 > **Status: resolved.** Phases 0–4 and 6 complete; Phase 5 has one box deliberately unmet
 > (not filed — see below). Primary target: [redb](https://github.com/cberner/redb). Control:
 > SQLite. 10,942 crash states tested; one real bug found — permanent data loss, verified on
-> 3.1.3 and 4.1.0 (the newest release), fixed on master and unreleased. See
-> [Results](#results) and [Findings](#findings).
+> 3.1.3 and 4.1.0, fixed upstream and released in 4.2.0 (2026-08-17), which recovers the
+> length-corrected image with every acknowledged value intact. See [Results](#results) and
+> [Findings](#findings).
 >
 > Plan: [`docs/EXECUTION-PLAN.md`](docs/EXECUTION-PLAN.md) · Spec: [`CLAUDE.md`](CLAUDE.md)
 
@@ -147,12 +148,13 @@ enough to test the primary target at all.
 
 ## Findings
 
-**One real bug, independently rediscovered, already fixed upstream and unreleased.**
-Tested directly against 3.1.3 and 4.1.0 (the newest tagged release), redb permanently loses
-an intact, fully-recoverable database to a crash-legal image: `Database::open` panics
-instead of running the recovery that a fixed build completes cleanly. `git tag --contains`
-confirms no released tag — 75 checked — contains the fix. The reordering behind it was
-demonstrated directly on a stock ext4 filesystem, and redb's own maintainer had already
+**One real bug, independently rediscovered, already fixed upstream and released in 4.2.0.**
+Tested directly against 3.1.3 and 4.1.0, redb permanently loses an intact, fully-recoverable
+database to a crash-legal image: `Database::open` panics instead of running the recovery
+that a fixed build completes cleanly. When the finding was triaged (2026-08-16) no released
+tag — 75 checked — contained the fix; v4.2.0, published the next day, does, and recovers the
+length-corrected image with all fifteen acknowledged values intact. The reordering behind it
+was demonstrated directly on a stock ext4 filesystem, and redb's own maintainer had already
 diagnosed and fixed the identical bug on master before this project chose redb as its
 target, unknown to us until after triage — see [`docs/findings.md`](docs/findings.md) for
 the full evidence chain and [`docs/disclosure.md`](docs/disclosure.md) for the hostile
@@ -215,7 +217,7 @@ target routes its file I/O through libc.
 | 2 | Crash state enumeration | Complete |
 | 3 | Recovery and the oracle | Complete |
 | 4 | Campaign | Complete — 10,942 states, one real finding |
-| 5 | Disclosure | Resolved, one box deliberately unmet — real bug, already fixed upstream, report drafted and deliberately not filed |
+| 5 | Disclosure | Resolved, one box deliberately unmet — real bug, fixed upstream and released in 4.2.0; report drafted and deliberately not filed, release inquiry withdrawn |
 | 6 | Write-up | This document |
 
 ## Safety

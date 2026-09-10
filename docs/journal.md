@@ -849,6 +849,40 @@ implicit. The claims in `CLAUDE.md`, `README.md`, and `docs/disclosure.md` were 
 say what was actually verified: never having run this specific pipeline, on a machine
 meeting the Requirements section, not a bare machine with nothing installed.
 
+### Addendum — 2026-09-10: redb 4.2.0 ships the fix, and the release inquiry is withdrawn
+
+**Tried.** Before sending the release inquiry in `docs/disclosure.md`, checked upstream.
+redb v4.2.0 was tagged on 2026-08-17 (`23b6ba0`, "Bump version to 4.2.0") and published to
+crates.io the same day, not yanked. Of 76 tags, v4.2.0 is the only one containing `fd82ced`
+and `88881b8`; `git merge-base --is-ancestor` confirms `c002202` is in it as well.
+`redb-query` was rebuilt, source unchanged, against `=4.1.0` and `=4.2.0` in scratch crates
+under `/var/lib/crashfuzz/vcheck`, and the Phase 5 version matrix was rerun on fresh copies
+of the packaged ext4 image at both lengths, opening each database twice:
+
+| redb | 8,650,240 (packaged) | 8,425,472 (strictly legal) |
+|---|---|---|
+| 3.1.3 | panic, `page_manager.rs:237` | panic, `page_manager.rs:237` |
+| 4.1.0 | panic, `page_manager.rs:231` | panic, `page_manager.rs:231` |
+| 4.2.0 | `DB corrupted: File length does not correspond to a valid region layout: file_len=8650240` | integrity ok, 15 keys |
+
+Every row gave the same result on the second open. The 4.2.0 keys were compared with the 15
+`durable=1` acknowledgements in the trace prefix's marker channel whose submission stamp
+precedes the crash stamp (282): identical on both opens. Recovery trimmed the file to
+8,392,704 bytes. The full suite was rerun the same day: 77 pass, 0 fail.
+
+**Failed.** The matrix script exited non-zero after its final run: a `grep -v` with nothing
+to print failed its pipeline under `set -euo pipefail`, exiting before the in-loop cleanup
+and image removal. The `EXIT` trap then unmounted and detached; no loop device was left
+attached, and the remaining scratch image was removed by hand.
+
+**Learned.** The inquiry asked whether a release containing the fix was planned; the release
+shipped the day after the inquiry was drafted. It was withdrawn unsent. The finding's status
+is now: permanent data loss on 3.1.3 and 4.1.0 (tested directly) and, by the maintainer's
+account, v4.1.0 and earlier; fixed in 4.2.0. At the packaged length 4.2.0 behaves as master
+`cff6e50` did in Phase 5, which is expected: that length is the materialization
+over-approximation recorded in `docs/model.md`, not a state ext4 can produce. The Phase 5
+"Filed" box stays unchecked, and nothing remains to send upstream.
+
 ---
 
 <!--
