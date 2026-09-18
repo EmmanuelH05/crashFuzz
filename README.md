@@ -194,6 +194,40 @@ is the strongest evidence available for what a clean run of this tool is actuall
   reported and only reached zero because two controls and a verification step kept forcing
   it there — see the failure log in [`docs/findings.md`](docs/findings.md#failure-log).
 
+## Design decisions
+
+The three calls the rest of the tool hangs off, recorded here because the reasoning matters
+more than the code that came out of it.
+
+**Trace ordering without serializing the target.** The hardest correctness problem was not
+the crash-state math — it was getting a trustworthy write order out of a multithreaded
+target without changing its behavior by observing it. Every intercepted syscall takes a
+submission and a completion timestamp from a single counter in a page shared across forked
+processes. That gives the whole trace a total order with no lock in the hot path. See
+[`docs/trace-format.md`](docs/trace-format.md).
+
+**Four filesystem models, deliberately not flattened.** Collapsing ext4 `data=ordered`,
+ext4 `data=journal`, xfs and btrfs into one conservative model would have been simpler and
+would have destroyed the result. They diverge on purpose, and the divergence is what made
+the redb finding interpretable: it appears on the three models that permit the reordering
+and on none of the one that doesn't. Any persistence property no cited source explicitly
+documents is disabled by default. See [`docs/model.md`](docs/model.md).
+
+**The asymmetry that governs every bound.** A missed bug costs nothing here. A wrongly
+flagged one burns credibility permanently, and it is not recoverable by apologizing later.
+Every bound in [`core/src/enumerate/bounds.jsonc`](core/src/enumerate/bounds.jsonc) and
+every oracle decision resolves in that direction, which is also why a control target that
+comes back clean is treated as a precondition for believing anything about the primary
+target rather than as a nice-to-have.
+
+## How this was built
+
+Written with heavy use of Claude Code. The prior-art survey, the persistence model, the
+bounds above, and every decision about what to trust are mine.
+[`docs/journal.md`](docs/journal.md) is the unedited record of reaching them — including
+the six oracle defects the controls caught, the seventh found during Phase 5 verification,
+and the approaches in the failure log that did not work and were kept rather than removed.
+
 ## Layout
 
 | Path | Contents |
