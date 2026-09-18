@@ -4,7 +4,10 @@ node_modules/
 # Build output
 shim/build/
 shim/*.so
-targets/build/
+# Each target builds into its own build/ dir (targets/<name>/build/), so the
+# rule has to descend. A bare `targets/build/` matched nothing and let three
+# aarch64 ELF binaries get committed.
+targets/**/build/
 
 # Materialized crash images and captured traces. Large, regenerable, and
 # machine-specific. Test fixtures under core/tests/ are committed.
@@ -22,6 +25,11 @@ artifacts/**/traces/
 
 # tdd-guard test result bridge output (regenerated each run)
 .claude/tdd-guard/
+
+# Agent worktrees are full self-copies of this repo. Never commit them; they
+# also inflate any recursive count run over the tree (once reported 1730 tests
+# instead of 77).
+.claude/worktrees/
 
 # Cargo build output for Phase 0 target workloads
 targets/**/target/
