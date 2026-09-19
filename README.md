@@ -225,8 +225,8 @@ target rather than as a nice-to-have.
 Written with heavy use of Claude Code. The prior-art survey, the persistence model, the
 bounds above, and every decision about what to trust are mine.
 [`docs/journal.md`](docs/journal.md) is the unedited record of reaching them — including
-the six oracle defects the controls caught, the seventh found during Phase 5 verification,
-and the approaches in the failure log that did not work and were kept rather than removed.
+the seven defects in this tool that were caught and fixed before any bug was claimed, and
+the approaches in the failure log that did not work and were kept rather than removed.
 
 ## Layout
 
